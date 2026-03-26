@@ -3,6 +3,8 @@ using RelayChat.Node.Contracts;
 
 namespace RelayChat.Client.Services;
 
+public sealed record ScreenShareResult(bool Started, bool AudioIncluded, bool FellBackToVideoOnly);
+
 public sealed class VoiceClient(IJSRuntime jsRuntime) : IAsyncDisposable
 {
     private IJSObjectReference? module;
@@ -67,15 +69,16 @@ public sealed class VoiceClient(IJSRuntime jsRuntime) : IAsyncDisposable
         IsCameraEnabled = isEnabled;
     }
 
-    public async Task SetScreenShareEnabled(bool isEnabled, bool shareAudio)
+    public async Task<ScreenShareResult> SetScreenShareEnabled(bool isEnabled)
     {
         if (module is null)
         {
-            return;
+            return new ScreenShareResult(false, false, false);
         }
 
-        await module.InvokeVoidAsync("setScreenShareEnabled", isEnabled, shareAudio);
-        IsScreenShareEnabled = isEnabled;
+        var result = await module.InvokeAsync<ScreenShareResult>("setScreenShareEnabled", isEnabled);
+        IsScreenShareEnabled = result.Started;
+        return result;
     }
 
     [JSInvokable]

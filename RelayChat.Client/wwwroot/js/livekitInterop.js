@@ -283,24 +283,97 @@ async function stopScreenShare() {
     screenShareTracks = [];
 }
 
-export async function setScreenShareEnabled(isEnabled, shareAudio) {
+export async function setScreenShareEnabled(isEnabled) {
     if (!room) {
-        return;
+        return {
+            started: false,
+            audioIncluded: false,
+            fellBackToVideoOnly: false
+        };
     }
 
     if (!isEnabled) {
         await stopScreenShare();
-        return;
+        return {
+            started: false,
+            audioIncluded: false,
+            fellBackToVideoOnly: false
+        };
     }
 
     await stopScreenShare();
-    const tracks = await room.localParticipant.createScreenTracks({
-        audio: shareAudio
-    });
+    let tracks;
+    let fellBackToVideoOnly = false;
+    try {
+        tracks = await room.localParticipant.createScreenTracks({
+            audio: true
+        });
+    } catch {
+        fellBackToVideoOnly = true;
+        tracks = await room.localParticipant.createScreenTracks({
+            audio: false
+        });
+    }
 
     for (const track of tracks) {
         await room.localParticipant.publishTrack(track);
     }
 
     screenShareTracks = tracks;
+    return {
+        started: true,
+        audioIncluded: tracks.some(track => track.kind === "audio"),
+        fellBackToVideoOnly
+    };
+}
+
+export async function debugScreenCapture() {
+    const results = {
+        userAgent: navigator.userAgent,
+        attempts: []
+    };
+
+    for (const audioEnabled of [true, false]) {
+        const attempt = {
+            audioRequested: audioEnabled
+        };
+
+        try {
+            const stream = await navigator.mediaDevices.getDisplayMedia({
+                video: true,
+                audio: audioEnabled
+            });
+
+            const tracks = stream.getTracks().map(track => ({
+                kind: track.kind,
+                label: track.label,
+                enabled: track.enabled,
+                muted: track.muted,
+                readyState: track.readyState,
+                settings: typeof track.getSettings === "function" ? track.getSettings() : null
+            }));
+
+            attempt.success = true;
+            attempt.tracks = tracks;
+
+            for (const track of stream.getTracks()) {
+                try {
+                    track.stop();
+                } catch {
+                    // Ignore stop failures in diagnostics.
+                }
+            }
+        } catch (error) {
+            attempt.success = false;
+            attempt.error = {
+                name: error?.name ?? null,
+                message: error?.message ?? String(error)
+            };
+        }
+
+        results.attempts.push(attempt);
+    }
+
+    console.log("RelayChat screen capture debug", results);
+    return results;
 }

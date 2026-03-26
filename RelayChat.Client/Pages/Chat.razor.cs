@@ -14,7 +14,6 @@ public partial class Chat : ComponentBase, IAsyncDisposable
     private readonly List<VoiceParticipantDto> voiceParticipants = [];
     private HashSet<Guid> activeSpeakerIds = [];
     private HashSet<Guid> videoParticipantIds = [];
-    private bool shareScreenWithAudio = true;
     private Guid? joinedChannelId;
     private string messageText = string.Empty;
     private string editText = string.Empty;
@@ -41,6 +40,9 @@ public partial class Chat : ComponentBase, IAsyncDisposable
     [Inject]
     public required VoiceClient VoiceClient { get; init; }
 
+    [Inject]
+    public required ISnackbar Snackbar { get; init; }
+
     protected Guid _channelId => ChannelId;
     protected bool _isAuthenticated { get; private set; }
     protected MembershipRole? _membershipRole { get; private set; }
@@ -52,11 +54,6 @@ public partial class Chat : ComponentBase, IAsyncDisposable
     protected bool _isVoiceMuted => VoiceClient.IsMuted;
     protected bool _isCameraEnabled => VoiceClient.IsCameraEnabled;
     protected bool _isScreenShareEnabled => VoiceClient.IsScreenShareEnabled;
-    protected bool _shareScreenWithAudio
-    {
-        get => shareScreenWithAudio;
-        set => shareScreenWithAudio = value;
-    }
     protected IReadOnlyList<ChannelDto> _channels => channels;
     protected IReadOnlyList<ChatMessage> _messages => messages;
     protected IReadOnlyList<VoiceParticipantDto> _voiceParticipants => voiceParticipants;
@@ -222,7 +219,14 @@ public partial class Chat : ComponentBase, IAsyncDisposable
     protected async Task ToggleScreenShare()
     {
         var newScreenShareState = !VoiceClient.IsScreenShareEnabled;
-        await VoiceClient.SetScreenShareEnabled(newScreenShareState, shareScreenWithAudio);
+        var result = await VoiceClient.SetScreenShareEnabled(newScreenShareState);
+        if (result.FellBackToVideoOnly)
+        {
+            Snackbar.Add(
+                "Audio capture was unavailable for the selected source. Sharing screen without audio instead. Browser tabs support audio more reliably than windows or full displays.",
+                Severity.Warning);
+        }
+
         await InvokeAsync(StateHasChanged);
     }
 
