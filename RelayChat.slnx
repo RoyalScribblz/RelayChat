@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="RelayChat.Client/RelayChat.Client.csproj" />
+  <Project Path="RelayChat.ControlPlane.Api/RelayChat.ControlPlane.Api.csproj" />
+  <Project Path="RelayChat.Node.Api/RelayChat.Node.Api.csproj" />
+</Solution>
