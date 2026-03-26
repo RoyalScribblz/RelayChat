@@ -21,12 +21,18 @@ public sealed class ChatClient : IAsyncDisposable
             {
                 await JoinChannel(joinedChannelId.Value);
             }
+
+            if (Reconnected is not null)
+            {
+                await Reconnected.Invoke();
+            }
         };
     }
 
     public Guid UserId { get; } = Guid.NewGuid();
 
     public event Action<MessageDto>? MessageReceived;
+    public event Func<Task>? Reconnected;
 
     public async Task Connect(CancellationToken ct = default)
     {

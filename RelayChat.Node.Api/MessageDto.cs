@@ -1,3 +1,5 @@
+using RelayChat.Node.Database;
+
 namespace RelayChat.Node.Api;
 
 public sealed record MessageDto(

@@ -1,4 +1,4 @@
-namespace RelayChat.Node.Api;
+namespace RelayChat.Node.Database;
 
 public sealed class Message
 {

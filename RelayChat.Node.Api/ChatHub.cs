@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.SignalR;
+using RelayChat.Node.Database;
 
 namespace RelayChat.Node.Api;
 

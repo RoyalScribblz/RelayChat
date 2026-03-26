@@ -1,6 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 
-namespace RelayChat.Node.Api;
+namespace RelayChat.Node.Database;
 
 public sealed class NodeDbContext(DbContextOptions<NodeDbContext> options) : DbContext(options)
 {
