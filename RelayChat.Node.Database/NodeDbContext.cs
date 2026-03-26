@@ -6,23 +6,22 @@ public sealed class NodeDbContext(DbContextOptions<NodeDbContext> options) : DbC
 {
     public DbSet<Channel> Channels => Set<Channel>();
     public DbSet<Message> Messages => Set<Message>();
-    public DbSet<ServerMembership> ServerMemberships => Set<ServerMembership>();
-    public DbSet<Server> Servers => Set<Server>();
+    public DbSet<Membership> Memberships => Set<Membership>();
+    public DbSet<NodeState> NodeStates => Set<NodeState>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        modelBuilder.Entity<ServerMembership>().HasKey(membership => new { membership.ServerId, membership.UserId });
+        modelBuilder.Entity<Membership>().HasKey(membership => membership.UserId);
 
-        modelBuilder.Entity<Server>().HasData(new Server
+        modelBuilder.Entity<NodeState>().HasData(new NodeState
         {
-            Id = NodeSeedData.DefaultServerId,
+            Id = NodeSeedData.DefaultNodeId,
             Name = "Relay"
         });
 
         modelBuilder.Entity<Channel>().HasData(new Channel
         {
             Id = NodeSeedData.DefaultChannelId,
-            ServerId = NodeSeedData.DefaultServerId,
             Name = "general"
         });
     }

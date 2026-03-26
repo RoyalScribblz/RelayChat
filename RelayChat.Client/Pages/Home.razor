@@ -1,29 +1,13 @@
 @page "/"
-@page "/servers/{ServerId:guid}"
 
 <PageTitle>RelayChat</PageTitle>
 
-<MudContainer MaxWidth="MaxWidth.False" Class="pa-4">
+<MudContainer MaxWidth="MaxWidth.Large" Class="pa-4">
     <MudStack Spacing="3">
         <MudStack Spacing="0">
             <MudText Typo="Typo.h3">RelayChat</MudText>
-            <MudText Typo="Typo.body1">Choose a server, then open a channel.</MudText>
+            <MudText Typo="Typo.body1">This client connects to a single node. Join it, then open a channel.</MudText>
         </MudStack>
-
-        <MudPaper Class="pa-4" Outlined="true">
-            <MudStack Row="true" Spacing="2" AlignItems="AlignItems.End">
-                <MudTextField @bind-Value="_newServerName"
-                              Label="New server"
-                              Variant="Variant.Outlined"
-                              FullWidth="true" />
-                <MudButton Variant="Variant.Filled"
-                           Color="Color.Primary"
-                           OnClick="CreateServer"
-                           Disabled="@string.IsNullOrWhiteSpace(_newServerName)">
-                    Create Server
-                </MudButton>
-            </MudStack>
-        </MudPaper>
 
         @if (!string.IsNullOrWhiteSpace(_errorMessage))
         {
@@ -32,75 +16,129 @@
         else
         {
             <MudGrid Spacing="3">
-                <MudItem xs="12" md="4" lg="3">
-                    <MudPaper Class="pa-3 h-100" Outlined="true">
-                        <MudText Typo="Typo.h6" Class="mb-2">Servers</MudText>
+                <MudItem xs="12" md="4">
+                    <MudPaper Class="pa-4 h-100" Outlined="true">
+                        <MudStack Spacing="2">
+                            <MudStack Spacing="0">
+                                <MudText Typo="Typo.h5">@_nodeName</MudText>
+                                <MudText Typo="Typo.body2">
+                                    Role: @(_membership is null ? (_isAuthenticated ? "Not joined" : "Sign in required") : _membership.Role)
+                                </MudText>
+                            </MudStack>
 
-                        @if (_servers.Count == 0)
-                        {
-                            <MudText Typo="Typo.body2">No servers available.</MudText>
-                        }
-                        else
-                        {
-                            <MudList T="string">
-                                @foreach (var server in _servers)
-                                {
-                                    <MudListItem T="string"
-                                                 Href="@GetServerHref(server.Id)"
-                                                 Icon="@Icons.Material.Rounded.Dns"
-                                                 Class="mb-1">
-                                        <MudText Color="@(server.Id == _selectedServer?.Id ? Color.Primary : Color.Inherit)">
-                                            @server.Name
-                                        </MudText>
-                                    </MudListItem>
-                                }
-                            </MudList>
-                        }
+                            @if (!_isAuthenticated)
+                            {
+                                <MudButton Variant="Variant.Filled"
+                                           Color="Color.Primary"
+                                           OnClick="Login">
+                                    Login
+                                </MudButton>
+                            }
+                            else if (_membership is null)
+                            {
+                                <MudButton Variant="Variant.Filled"
+                                           Color="Color.Primary"
+                                           OnClick="JoinNode">
+                                    Join Node
+                                </MudButton>
+                            }
+                            else
+                            {
+                                <MudAlert Severity="Severity.Success">You can open channels on this node.</MudAlert>
+                            }
+                        </MudStack>
                     </MudPaper>
                 </MudItem>
 
-                <MudItem xs="12" md="8" lg="9">
+                <MudItem xs="12" md="8">
                     <MudPaper Class="pa-4 h-100" Outlined="true">
-                        @if (_selectedServer is null)
-                        {
-                            <MudText Typo="Typo.body2">Select a server to view channels.</MudText>
-                        }
-                        else
-                        {
-                            <MudStack Spacing="2">
-                                <MudStack Spacing="0">
-                                    <MudText Typo="Typo.h5">@_selectedServer.Name</MudText>
-                                    <MudText Typo="Typo.body2">Role: @_selectedMembershipRole</MudText>
-                                </MudStack>
+                        <MudStack Spacing="2">
+                            <MudText Typo="Typo.h6">Channels</MudText>
 
-                                @if (!_isSelectedServerMember)
+                            @if (_channels.Count == 0)
+                            {
+                                <MudText Typo="Typo.body2">No channels available.</MudText>
+                            }
+                            else
+                            {
+                                <MudList T="string">
+                                    @foreach (var channel in _channels)
+                                    {
+                                        <MudListItem T="string"
+                                                     Href="@GetChannelHref(channel.Id)"
+                                                     Icon="@Icons.Material.Rounded.Tag"
+                                                     Class="mb-1">
+                                            <MudText>#@channel.Name</MudText>
+                                        </MudListItem>
+                                    }
+                                </MudList>
+                            }
+                        </MudStack>
+                    </MudPaper>
+                </MudItem>
+
+                <MudItem xs="12">
+                    <MudPaper Class="pa-4" Outlined="true">
+                        <MudStack Spacing="3">
+                            <MudStack Spacing="0">
+                                <MudText Typo="Typo.h6">Profile</MudText>
+                                <MudText Typo="Typo.body2">Set the name people see, your unique handle, and an avatar URL.</MudText>
+                            </MudStack>
+
+                            @if (!_isAuthenticated)
+                            {
+                                <MudAlert Severity="Severity.Info">Sign in to manage your profile.</MudAlert>
+                            }
+                            else
+                            {
+                                <MudGrid Spacing="2">
+                                    <MudItem xs="12" md="4">
+                                        <MudTextField @bind-Value="_profileName"
+                                                      Label="Display name"
+                                                      Variant="Variant.Outlined"
+                                                      FullWidth="true" />
+                                    </MudItem>
+                                    <MudItem xs="12" md="4">
+                                        <MudTextField @bind-Value="_profileHandle"
+                                                      Label="Handle"
+                                                      Variant="Variant.Outlined"
+                                                      FullWidth="true" />
+                                    </MudItem>
+                                    <MudItem xs="12" md="4">
+                                        <MudTextField @bind-Value="_profileAvatarUrl"
+                                                      Label="Avatar URL"
+                                                      Variant="Variant.Outlined"
+                                                      FullWidth="true" />
+                                    </MudItem>
+                                </MudGrid>
+
+                                @if (!string.IsNullOrWhiteSpace(_profileEmail))
                                 {
+                                    <MudText Typo="Typo.body2">Email: @_profileEmail</MudText>
+                                }
+
+                                @if (!string.IsNullOrWhiteSpace(_profileStatusMessage))
+                                {
+                                    <MudAlert Severity="Severity.Success">@_profileStatusMessage</MudAlert>
+                                }
+                                @if (!string.IsNullOrWhiteSpace(_profileErrorMessage))
+                                {
+                                    <MudAlert Severity="Severity.Error">@_profileErrorMessage</MudAlert>
+                                }
+
+                                <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
                                     <MudButton Variant="Variant.Filled"
                                                Color="Color.Primary"
-                                               OnClick="JoinSelectedServer">
-                                        Join Server
+                                               OnClick="SaveProfile">
+                                        Save Profile
                                     </MudButton>
-                                }
-                                else if (_selectedChannels.Count == 0)
-                                {
-                                    <MudText Typo="Typo.body2">No channels available.</MudText>
-                                }
-                                else
-                                {
-                                    <MudList T="string">
-                                        @foreach (var channel in _selectedChannels)
-                                        {
-                                            <MudListItem T="string"
-                                                         Href="@GetChannelHref(_selectedServer.Id, channel.Id)"
-                                                         Icon="@Icons.Material.Rounded.Tag"
-                                                         Class="mb-1">
-                                                <MudText>#@channel.Name</MudText>
-                                            </MudListItem>
-                                        }
-                                    </MudList>
-                                }
-                            </MudStack>
-                        }
+                                    @if (!string.IsNullOrWhiteSpace(_profilePreviewHandle))
+                                    {
+                                        <MudText Typo="Typo.body2">@($"Preview: {_profileName} (@{_profilePreviewHandle})")</MudText>
+                                    }
+                                </MudStack>
+                            }
+                        </MudStack>
                     </MudPaper>
                 </MudItem>
             </MudGrid>

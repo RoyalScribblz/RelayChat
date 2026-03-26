@@ -5,13 +5,26 @@ namespace RelayChat.Client.Services;
 
 public sealed class ChatClient : IAsyncDisposable
 {
+    private readonly AuthService authService;
     private readonly HubConnection connection;
     private Guid? joinedChannelId;
 
-    public ChatClient(NodeApiOptions options)
+    public ChatClient(NodeApiOptions options, AuthService authService)
     {
+        this.authService = authService;
         connection = new HubConnectionBuilder()
-            .WithUrl($"{options.BaseUrl.TrimEnd('/')}/chathub")
+            .WithUrl($"{options.BaseUrl.TrimEnd('/')}/chathub", hubOptions =>
+            {
+                hubOptions.AccessTokenProvider = async () =>
+                {
+                    if (!joinedChannelId.HasValue)
+                    {
+                        return null;
+                    }
+
+                    return await authService.GetNodeToken();
+                };
+            })
             .WithAutomaticReconnect()
             .Build();
 
@@ -31,8 +44,6 @@ public sealed class ChatClient : IAsyncDisposable
         };
     }
 
-    public Guid UserId { get; } = Guid.NewGuid();
-
     public event Action<MessageDto>? MessageReceived;
     public event Action<MessageDto>? MessageUpdated;
     public event Func<Task>? Reconnected;
@@ -49,7 +60,7 @@ public sealed class ChatClient : IAsyncDisposable
     {
         joinedChannelId = channelId;
         await Connect(ct);
-        await connection.InvokeAsync("JoinChannel", new JoinChannelRequest(channelId, UserId), ct);
+        await connection.InvokeAsync("JoinChannel", new JoinChannelRequest(channelId), ct);
     }
 
     public Task SendMessage(SendMessageRequest request, CancellationToken ct = default)

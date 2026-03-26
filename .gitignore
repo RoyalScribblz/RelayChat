@@ -5,6 +5,10 @@
 
 # dotenv files
 .env
+docker/authentik/.env
+docker/authentik/data/
+docker/authentik/certs/
+docker/authentik/schema.json
 
 # User-specific files
 *.rsuser

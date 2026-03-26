@@ -1,9 +1,8 @@
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
-using System.Net.Http.Json;
+using MudBlazor;
 using RelayChat.Client.Services;
 using RelayChat.Node.Contracts;
-using MudBlazor;
 
 namespace RelayChat.Client.Pages;
 
@@ -12,34 +11,31 @@ public partial class Chat : ComponentBase, IDisposable
     private const int HistoryPageSize = 100;
     private readonly List<ChatMessage> messages = [];
     private readonly List<ChannelDto> channels = [];
-    private readonly List<ServerDto> servers = [];
     private Guid? joinedChannelId;
-    private Guid? editingMessageId;
     private string messageText = string.Empty;
     private string editText = string.Empty;
     private string newChannelName = string.Empty;
-    private HttpClient? httpClient;
-
-    [Parameter]
-    public Guid ServerId { get; set; }
+    private Guid? editingMessageId;
 
     [Parameter]
     public Guid ChannelId { get; set; }
 
     [Inject]
-    public required ChatClient ChatClient { get; init; }
+    public required AuthService AuthService { get; init; }
 
     [Inject]
-    public required NodeApiOptions NodeApiOptions { get; init; }
+    public required ChatClient ChatClient { get; init; }
 
     [Inject]
     public required NavigationManager NavigationManager { get; init; }
 
+    [Inject]
+    public required NodeApiClient NodeApiClient { get; init; }
+
     protected Guid _channelId => ChannelId;
-    protected IReadOnlyList<ServerDto> _servers => servers;
-    protected bool _hasMembership { get; private set; }
-    protected ServerMembershipRole _membershipRole { get; private set; } = ServerMembershipRole.Member;
-    protected string _serverName { get; private set; } = string.Empty;
+    protected bool _isAuthenticated { get; private set; }
+    protected MembershipRole? _membershipRole { get; private set; }
+    protected string _nodeName { get; private set; } = "Relay";
     protected string _channelName { get; private set; } = string.Empty;
     protected IReadOnlyList<ChannelDto> _channels => channels;
     protected IReadOnlyList<ChatMessage> _messages => messages;
@@ -62,7 +58,7 @@ public partial class Chat : ComponentBase, IDisposable
 
     protected override async Task OnInitializedAsync()
     {
-        httpClient = new HttpClient { BaseAddress = new Uri(NodeApiOptions.BaseUrl) };
+        await AuthService.Initialize();
         ChatClient.MessageReceived += OnMessageReceived;
         ChatClient.MessageUpdated += OnMessageUpdated;
         ChatClient.Reconnected += OnReconnected;
@@ -70,8 +66,6 @@ public partial class Chat : ComponentBase, IDisposable
 
     protected override async Task OnParametersSetAsync()
     {
-        ArgumentNullException.ThrowIfNull(httpClient);
-
         await LoadChannelContext();
         if (joinedChannelId != ChannelId)
         {
@@ -81,14 +75,14 @@ public partial class Chat : ComponentBase, IDisposable
             editText = string.Empty;
         }
 
-        if (!_hasMembership)
+        if (!_isAuthenticated || _membershipRole is null)
         {
             joinedChannelId = null;
             return;
         }
 
-        var history = await GetMessages(limit: HistoryPageSize);
         messages.Clear();
+        var history = await NodeApiClient.GetMessages(ChannelId, limit: HistoryPageSize);
         foreach (var message in history)
         {
             MergeConfirmedMessage(message);
@@ -98,9 +92,28 @@ public partial class Chat : ComponentBase, IDisposable
         joinedChannelId = ChannelId;
     }
 
+    protected void Login()
+    {
+        NavigationManager.NavigateTo(
+            AuthService.GetLoginUrl(NavigationManager.ToBaseRelativePath(NavigationManager.Uri)),
+            forceLoad: true);
+    }
+
+    protected async Task JoinNode()
+    {
+        if (!_isAuthenticated)
+        {
+            Login();
+            return;
+        }
+
+        var membership = await NodeApiClient.JoinNode();
+        _membershipRole = membership?.Role;
+    }
+
     protected async Task SendMessage()
     {
-        if (!_hasMembership)
+        if (!_isAuthenticated || _membershipRole is null || !AuthService.UserId.HasValue)
         {
             return;
         }
@@ -116,7 +129,7 @@ public partial class Chat : ComponentBase, IDisposable
             Message = new MessageDto(
                 Guid.NewGuid(),
                 ChannelId,
-                ChatClient.UserId,
+                AuthService.UserId.Value,
                 content,
                 DateTimeOffset.UtcNow,
                 Guid.NewGuid(),
@@ -135,7 +148,6 @@ public partial class Chat : ComponentBase, IDisposable
         {
             await ChatClient.SendMessage(new SendMessageRequest(
                 pendingMessage.Message.ChannelId,
-                pendingMessage.Message.AuthorId,
                 pendingMessage.Message.Content,
                 pendingMessage.Message.ClientMessageId!.Value));
         }
@@ -153,41 +165,6 @@ public partial class Chat : ComponentBase, IDisposable
         {
             await SendMessage();
         }
-    }
-
-    public void Dispose()
-    {
-        ChatClient.MessageReceived -= OnMessageReceived;
-        ChatClient.MessageUpdated -= OnMessageUpdated;
-        ChatClient.Reconnected -= OnReconnected;
-        httpClient?.Dispose();
-    }
-
-    private void OnMessageReceived(MessageDto message)
-    {
-        if (message.ChannelId != ChannelId)
-        {
-            return;
-        }
-
-        MergeConfirmedMessage(message);
-        _ = InvokeAsync(StateHasChanged);
-    }
-
-    private void OnMessageUpdated(MessageDto message)
-    {
-        if (message.ChannelId != ChannelId)
-        {
-            return;
-        }
-
-        MergeConfirmedMessage(message);
-        if (editingMessageId == message.Id)
-        {
-            CancelEdit();
-        }
-
-        _ = InvokeAsync(StateHasChanged);
     }
 
     protected Color GetStateColor(MessageState state)
@@ -220,7 +197,7 @@ public partial class Chat : ComponentBase, IDisposable
 
     protected async Task SaveEdit()
     {
-        if (!editingMessageId.HasValue || !_hasMembership)
+        if (!editingMessageId.HasValue || _membershipRole is null)
         {
             return;
         }
@@ -234,27 +211,24 @@ public partial class Chat : ComponentBase, IDisposable
         await ChatClient.EditMessage(new EditMessageRequest(
             ChannelId,
             editingMessageId.Value,
-            ChatClient.UserId,
             content));
     }
 
     protected async Task DeleteMessage(ChatMessage message)
     {
-        if (!_hasMembership)
+        if (_membershipRole is null)
         {
             return;
         }
 
         await ChatClient.DeleteMessage(new DeleteMessageRequest(
             ChannelId,
-            message.Message.Id,
-            ChatClient.UserId));
+            message.Message.Id));
     }
 
     protected async Task CreateChannel()
     {
-        ArgumentNullException.ThrowIfNull(httpClient);
-        if (_membershipRole != ServerMembershipRole.Admin)
+        if (_membershipRole != MembershipRole.Admin)
         {
             return;
         }
@@ -265,19 +239,68 @@ public partial class Chat : ComponentBase, IDisposable
             return;
         }
 
-        var response = await httpClient.PostAsJsonAsync(
-            $"/servers/{ServerId}/channels",
-            new CreateChannelRequest(channelName, ChatClient.UserId));
-
-        response.EnsureSuccessStatusCode();
-        var channel = await response.Content.ReadFromJsonAsync<ChannelDto>();
+        var channel = await NodeApiClient.CreateChannel(new CreateChannelRequest(channelName));
         if (channel is null)
         {
             return;
         }
 
         newChannelName = string.Empty;
-        NavigationManager.NavigateTo($"/servers/{ServerId}/channels/{channel.Id}");
+        NavigationManager.NavigateTo($"/channels/{channel.Id}");
+    }
+
+    protected string GetChannelHref(ChannelDto channel)
+    {
+        return $"/channels/{channel.Id}";
+    }
+
+    protected bool CanEditMessage(ChatMessage message)
+    {
+        return message.IsOwnMessage && !message.Message.DeletedAt.HasValue;
+    }
+
+    protected bool CanDeleteMessage(ChatMessage message)
+    {
+        if (message.Message.DeletedAt.HasValue)
+        {
+            return false;
+        }
+
+        return message.IsOwnMessage || _membershipRole == MembershipRole.Admin;
+    }
+
+    public void Dispose()
+    {
+        ChatClient.MessageReceived -= OnMessageReceived;
+        ChatClient.MessageUpdated -= OnMessageUpdated;
+        ChatClient.Reconnected -= OnReconnected;
+    }
+
+    private void OnMessageReceived(MessageDto message)
+    {
+        if (message.ChannelId != ChannelId)
+        {
+            return;
+        }
+
+        MergeConfirmedMessage(message);
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private void OnMessageUpdated(MessageDto message)
+    {
+        if (message.ChannelId != ChannelId)
+        {
+            return;
+        }
+
+        MergeConfirmedMessage(message);
+        if (editingMessageId == message.Id)
+        {
+            CancelEdit();
+        }
+
+        _ = InvokeAsync(StateHasChanged);
     }
 
     private ChatMessage ToChatMessage(MessageDto message, MessageState state)
@@ -286,7 +309,7 @@ public partial class Chat : ComponentBase, IDisposable
         {
             Message = message,
             State = state,
-            IsOwnMessage = message.AuthorId == ChatClient.UserId
+            IsOwnMessage = AuthService.UserId.HasValue && message.AuthorId == AuthService.UserId.Value
         };
     }
 
@@ -310,12 +333,22 @@ public partial class Chat : ComponentBase, IDisposable
     private void MergeConfirmedMessage(MessageDto message)
     {
         var existing = messages.FirstOrDefault(current => current.Message.Id == message.Id);
+        if (message.DeletedAt.HasValue)
+        {
+            if (existing is not null)
+            {
+                messages.Remove(existing);
+                SortMessages();
+            }
+
+            return;
+        }
+
         if (existing is not null)
         {
             existing.Message = message;
             existing.State = MessageState.Confirmed;
             SortMessages();
-
             return;
         }
 
@@ -349,7 +382,10 @@ public partial class Chat : ComponentBase, IDisposable
     {
         while (true)
         {
-            var missingMessages = await GetMessages(after: GetLastConfirmedMessageId(), limit: HistoryPageSize);
+            var missingMessages = await NodeApiClient.GetMessages(
+                ChannelId,
+                after: GetLastConfirmedMessageId(),
+                limit: HistoryPageSize);
             if (missingMessages.Count == 0)
             {
                 return;
@@ -367,35 +403,6 @@ public partial class Chat : ComponentBase, IDisposable
         }
     }
 
-    private async Task<List<MessageDto>> GetMessages(Guid? before = null, Guid? after = null, int? limit = null)
-    {
-        ArgumentNullException.ThrowIfNull(httpClient);
-
-        var query = new List<string>();
-        if (before.HasValue)
-        {
-            query.Add($"before={before.Value}");
-        }
-
-        if (after.HasValue)
-        {
-            query.Add($"after={after.Value}");
-        }
-
-        if (limit.HasValue)
-        {
-            query.Add($"limit={limit.Value}");
-        }
-
-        var path = $"/servers/{ServerId}/channels/{ChannelId}/messages";
-        if (query.Count > 0)
-        {
-            path = $"{path}?{string.Join("&", query)}";
-        }
-
-        return await httpClient.GetFromJsonAsync<List<MessageDto>>(path) ?? [];
-    }
-
     private Guid? GetLastConfirmedMessageId()
     {
         return messages
@@ -408,69 +415,19 @@ public partial class Chat : ComponentBase, IDisposable
 
     private async Task LoadChannelContext()
     {
-        ArgumentNullException.ThrowIfNull(httpClient);
+        _isAuthenticated = AuthService.IsAuthenticated;
+        var node = await NodeApiClient.GetNode();
+        _nodeName = node?.Name ?? "Relay";
 
-        var servers = await httpClient.GetFromJsonAsync<List<ServerDto>>("/servers") ?? [];
-        this.servers.Clear();
-        this.servers.AddRange(servers);
-
-        var server = servers.FirstOrDefault(current => current.Id == ServerId)
-            ?? throw new InvalidOperationException($"Server '{ServerId}' was not returned by the node API.");
-
-        var availableChannels = await httpClient.GetFromJsonAsync<List<ChannelDto>>($"/servers/{ServerId}/channels") ?? [];
+        var availableChannels = await NodeApiClient.GetChannels();
         var channel = availableChannels.FirstOrDefault(current => current.Id == ChannelId)
             ?? throw new InvalidOperationException($"Channel '{ChannelId}' was not returned by the node API.");
-        _serverName = server.Name;
+
         _channelName = channel.Name;
         channels.Clear();
         channels.AddRange(availableChannels);
 
-        var membership = await GetMembership();
-        _hasMembership = membership is not null;
-        _membershipRole = membership?.Role ?? ServerMembershipRole.Member;
-    }
-
-    protected string GetChannelHref(ChannelDto channel)
-    {
-        return $"/servers/{ServerId}/channels/{channel.Id}";
-    }
-
-    protected string GetServerHref(ServerDto server)
-    {
-        if (server.Id == ServerId && channels.Count > 0)
-        {
-            return GetChannelHref(channels[0]);
-        }
-
-        return $"/servers/{server.Id}";
-    }
-
-    protected bool CanEditMessage(ChatMessage message)
-    {
-        return message.IsOwnMessage && !message.Message.DeletedAt.HasValue;
-    }
-
-    protected bool CanDeleteMessage(ChatMessage message)
-    {
-        if (message.Message.DeletedAt.HasValue)
-        {
-            return false;
-        }
-
-        return message.IsOwnMessage || _membershipRole == ServerMembershipRole.Admin;
-    }
-
-    private async Task<ServerMembershipDto?> GetMembership()
-    {
-        ArgumentNullException.ThrowIfNull(httpClient);
-
-        var response = await httpClient.GetAsync($"/servers/{ServerId}/memberships/{ChatClient.UserId}");
-        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
-        {
-            return null;
-        }
-
-        response.EnsureSuccessStatusCode();
-        return await response.Content.ReadFromJsonAsync<ServerMembershipDto>();
+        var membership = _isAuthenticated ? await NodeApiClient.GetMembership() : null;
+        _membershipRole = membership?.Role;
     }
 }

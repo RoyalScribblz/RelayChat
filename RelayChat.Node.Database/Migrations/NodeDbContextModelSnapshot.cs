@@ -32,9 +32,6 @@ namespace RelayChat.Node.Database.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
-                    b.Property<Guid>("ServerId")
-                        .HasColumnType("uuid");
-
                     b.HasKey("Id");
 
                     b.ToTable("Channels");
@@ -43,9 +40,22 @@ namespace RelayChat.Node.Database.Migrations
                         new
                         {
                             Id = new Guid("22222222-2222-2222-2222-222222222222"),
-                            Name = "general",
-                            ServerId = new Guid("11111111-1111-1111-1111-111111111111")
+                            Name = "general"
                         });
+                });
+
+            modelBuilder.Entity("RelayChat.Node.Database.Membership", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Role")
+                        .HasColumnType("integer");
+
+                    b.HasKey("UserId");
+
+                    b.ToTable("Memberships");
                 });
 
             modelBuilder.Entity("RelayChat.Node.Database.Message", b =>
@@ -81,7 +91,7 @@ namespace RelayChat.Node.Database.Migrations
                     b.ToTable("Messages");
                 });
 
-            modelBuilder.Entity("RelayChat.Node.Database.Server", b =>
+            modelBuilder.Entity("RelayChat.Node.Database.NodeState", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
@@ -93,7 +103,7 @@ namespace RelayChat.Node.Database.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("Servers");
+                    b.ToTable("NodeStates");
 
                     b.HasData(
                         new
@@ -101,22 +111,6 @@ namespace RelayChat.Node.Database.Migrations
                             Id = new Guid("11111111-1111-1111-1111-111111111111"),
                             Name = "Relay"
                         });
-                });
-
-            modelBuilder.Entity("RelayChat.Node.Database.ServerMembership", b =>
-                {
-                    b.Property<Guid>("ServerId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("uuid");
-
-                    b.Property<int>("Role")
-                        .HasColumnType("integer");
-
-                    b.HasKey("ServerId", "UserId");
-
-                    b.ToTable("ServerMemberships");
                 });
 #pragma warning restore 612, 618
         }

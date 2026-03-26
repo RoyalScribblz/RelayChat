@@ -1,0 +1,24 @@
+@page "/auth/complete"
+
+<PageTitle>Signing In</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Small" Class="py-8">
+    <MudPaper Class="pa-6" Outlined="true">
+        <MudStack Spacing="2">
+            <MudText Typo="Typo.h5">Signing In</MudText>
+            @if (!string.IsNullOrWhiteSpace(_errorMessage))
+            {
+                <MudAlert Severity="Severity.Error">@_errorMessage</MudAlert>
+                <MudButton Variant="Variant.Filled"
+                           Color="Color.Primary"
+                           Href="@_loginUrl">
+                    Retry Login
+                </MudButton>
+            }
+            else
+            {
+                <MudText Typo="Typo.body2">Completing the control-plane token exchange.</MudText>
+            }
+        </MudStack>
+    </MudPaper>
+</MudContainer>

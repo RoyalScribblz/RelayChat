@@ -1,4 +1,9 @@
+using System.Text;
+using System.Security.Claims;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
 using RelayChat.Node.Api;
 using RelayChat.Node.Contracts;
 using RelayChat.Node.Database;
@@ -6,6 +11,8 @@ using RelayChat.Node.Database;
 var builder = WebApplication.CreateBuilder(args);
 var connectionString = builder.Configuration.GetConnectionString("NodeDatabase")
     ?? throw new InvalidOperationException("Connection string 'NodeDatabase' was not found.");
+var relayTokens = builder.Configuration.GetSection("RelayTokens").Get<NodeRelayTokensOptions>()
+    ?? throw new InvalidOperationException("Missing Relay token configuration.");
 
 builder.Services.AddOpenApi();
 builder.Services.AddCors(options =>
@@ -18,6 +25,55 @@ builder.Services.AddCors(options =>
             .AllowCredentials();
     });
 });
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.MapInboundClaims = false;
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidIssuer = relayTokens.Issuer,
+            ValidateAudience = true,
+            ValidAudience = relayTokens.NodeAudience,
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(relayTokens.SigningKey)),
+            ValidateLifetime = true,
+            ClockSkew = TimeSpan.FromSeconds(30),
+            NameClaimType = "name"
+        };
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                var accessToken = context.Request.Query["access_token"];
+                var path = context.HttpContext.Request.Path;
+                if (!string.IsNullOrWhiteSpace(accessToken) && path.StartsWithSegments("/chathub"))
+                {
+                    context.Token = accessToken;
+                }
+
+                return Task.CompletedTask;
+            },
+            OnTokenValidated = context =>
+            {
+                var tokenType = context.Principal?.FindFirst(NodeRelayClaimTypes.TokenType)?.Value;
+                if (tokenType != NodeRelayTokenTypes.Node)
+                {
+                    context.Fail("Invalid token type.");
+                    return Task.CompletedTask;
+                }
+
+                var hasAccess = context.Principal?.HasNodeAccess() == true;
+                if (!hasAccess)
+                {
+                    context.Fail("Missing node access scope.");
+                }
+
+                return Task.CompletedTask;
+            }
+        };
+    });
+builder.Services.AddAuthorization();
 builder.Services.AddDbContext<NodeDbContext>(options => options.UseNpgsql(connectionString, npgsql =>
 {
     npgsql.MigrationsAssembly(typeof(NodeDbContext).Assembly.FullName);
@@ -25,8 +81,8 @@ builder.Services.AddDbContext<NodeDbContext>(options => options.UseNpgsql(connec
 builder.Services.AddSignalR();
 builder.Services.AddScoped<ChannelRepository>();
 builder.Services.AddScoped<MessageRepository>();
-builder.Services.AddScoped<ServerMembershipRepository>();
-builder.Services.AddScoped<ServerRepository>();
+builder.Services.AddScoped<MembershipRepository>();
+builder.Services.AddScoped<NodeStateRepository>();
 
 var app = builder.Build();
 
@@ -42,68 +98,34 @@ app.UseSwaggerUI(c =>
     c.SwaggerEndpoint("/openapi/v1.json", "v1");
 });
 app.UseCors();
+app.UseAuthentication();
+app.UseAuthorization();
 
 app.MapGet("/", () => "OK");
-app.MapGet("/servers", async (ServerRepository repository, CancellationToken ct) =>
+app.MapGet("/node", async (NodeStateRepository repository, CancellationToken ct) =>
 {
-    var servers = await repository.GetAll(ct);
-    return Results.Ok(servers.Select(server => server.ToDto()));
+    var node = await repository.Get(ct);
+    return node is null ? Results.NotFound() : Results.Ok(node.ToDto());
 });
-app.MapPost("/servers", async (
-    CreateServerRequest request,
-    ServerRepository serverRepository,
-    ChannelRepository channelRepository,
-    ServerMembershipRepository membershipRepository,
-    CancellationToken ct) =>
+app.MapGet("/channels", async (ChannelRepository repository, CancellationToken ct) =>
 {
-    var server = new Server
-    {
-        Id = Guid.NewGuid(),
-        Name = request.Name.Trim()
-    };
-
-    if (string.IsNullOrWhiteSpace(server.Name))
-    {
-        return Results.BadRequest();
-    }
-
-    var channel = new Channel
-    {
-        Id = Guid.NewGuid(),
-        ServerId = server.Id,
-        Name = "general"
-    };
-
-    await serverRepository.Add(server, ct);
-    await channelRepository.Add(channel, ct);
-    var membership = await membershipRepository.Add(server.Id, request.CreatorId, ServerMembershipRole.Admin, ct);
-
-    return Results.Ok(new CreateServerResultDto(
-        server.ToDto(),
-        channel.ToDto(),
-        membership.ToDto()));
-});
-app.MapGet("/servers/{serverId:guid}/channels", async (Guid serverId, ChannelRepository repository, CancellationToken ct) =>
-{
-    var channels = await repository.GetByServer(serverId, ct);
+    var channels = await repository.GetAll(ct);
     return Results.Ok(channels.Select(channel => channel.ToDto()));
 });
-app.MapPost("/servers/{serverId:guid}/channels", async (
-    Guid serverId,
+app.MapPost("/channels", [Authorize] async (
     CreateChannelRequest request,
-    ServerRepository serverRepository,
+    ClaimsPrincipal user,
     ChannelRepository channelRepository,
-    ServerMembershipRepository membershipRepository,
+    MembershipRepository membershipRepository,
     CancellationToken ct) =>
 {
-    var server = await serverRepository.Get(serverId, ct);
-    if (server is null)
+    if (!user.HasNodeAccess())
     {
-        return Results.NotFound();
+        return Results.Forbid();
     }
 
-    var membership = await membershipRepository.Get(serverId, request.UserId, ct);
-    if (membership?.Role != ServerMembershipRole.Admin)
+    var membership = await membershipRepository.Get(user.GetRequiredUserId(), ct);
+    if (membership?.Role != MembershipRole.Admin)
     {
         return Results.Forbid();
     }
@@ -117,67 +139,69 @@ app.MapPost("/servers/{serverId:guid}/channels", async (
     var channel = new Channel
     {
         Id = Guid.NewGuid(),
-        ServerId = serverId,
         Name = channelName
     };
 
     await channelRepository.Add(channel, ct);
     return Results.Ok(channel.ToDto());
 });
-app.MapGet("/servers/{serverId:guid}/memberships/{userId:guid}", async (
-    Guid serverId,
-    Guid userId,
-    ServerRepository serverRepository,
-    ServerMembershipRepository membershipRepository,
+app.MapGet("/memberships/me", [Authorize] async (
+    ClaimsPrincipal user,
+    MembershipRepository membershipRepository,
     CancellationToken ct) =>
 {
-    var server = await serverRepository.Get(serverId, ct);
-    if (server is null)
+    if (!user.HasNodeAccess())
     {
-        return Results.NotFound();
+        return Results.Forbid();
     }
 
-    var membership = await membershipRepository.Get(serverId, userId, ct);
-    if (membership is null)
-    {
-        return Results.NotFound();
-    }
-
-    return Results.Ok(membership.ToDto());
+    var membership = await membershipRepository.Get(user.GetRequiredUserId(), ct);
+    return membership is null ? Results.NotFound() : Results.Ok(membership.ToDto());
 });
-app.MapPost("/servers/{serverId:guid}/memberships", async (
-    Guid serverId,
-    JoinServerRequest request,
-    ServerRepository serverRepository,
-    ServerMembershipRepository membershipRepository,
+app.MapPost("/memberships", [Authorize] async (
+    ClaimsPrincipal user,
+    MembershipRepository membershipRepository,
     CancellationToken ct) =>
 {
-    var server = await serverRepository.Get(serverId, ct);
-    if (server is null)
+    if (!user.HasNodeAccess())
     {
-        return Results.NotFound();
+        return Results.Forbid();
     }
 
-    var existing = await membershipRepository.Get(serverId, request.UserId, ct);
+    var userId = user.GetRequiredUserId();
+    var existing = await membershipRepository.Get(userId, ct);
     if (existing is not null)
     {
         return Results.Ok(existing.ToDto());
     }
 
-    var membership = await membershipRepository.Add(serverId, request.UserId, ServerMembershipRole.Member, ct);
+    var role = await membershipRepository.Any(ct) ? MembershipRole.Member : MembershipRole.Admin;
+    var membership = await membershipRepository.Add(userId, role, ct);
     return Results.Ok(membership.ToDto());
 });
-app.MapGet("/servers/{serverId:guid}/channels/{channelId:guid}/messages", async (
-    Guid serverId,
+app.MapGet("/channels/{channelId:guid}/messages", [Authorize] async (
     Guid channelId,
     Guid? before,
     Guid? after,
     int? limit,
+    ClaimsPrincipal user,
     ChannelRepository channelRepository,
+    MembershipRepository membershipRepository,
     MessageRepository repository,
     CancellationToken ct) =>
 {
-    var channel = await channelRepository.Get(serverId, channelId, ct);
+    if (!user.HasNodeAccess())
+    {
+        return Results.Forbid();
+    }
+
+    var membership = await membershipRepository.Get(user.GetRequiredUserId(), ct);
+    if (membership is null)
+    {
+        return Results.Forbid();
+    }
+
+    var channel = await channelRepository.Get(channelId, ct);
     if (channel is null)
     {
         return Results.NotFound();
@@ -189,6 +213,6 @@ app.MapGet("/servers/{serverId:guid}/channels/{channelId:guid}/messages", async 
         .ThenBy(message => message.Id)
         .Select(message => message.ToDto()));
 });
-app.MapHub<ChatHub>("/chathub");
+app.MapHub<ChatHub>("/chathub").RequireAuthorization();
 
 app.Run();

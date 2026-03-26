@@ -1,6 +1,6 @@
 namespace RelayChat.Node.Database;
 
-public sealed class Server
+public sealed class NodeState
 {
     public Guid Id { get; set; }
     public string Name { get; set; } = string.Empty;

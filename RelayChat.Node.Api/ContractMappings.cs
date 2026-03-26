@@ -7,7 +7,7 @@ public static class ContractMappings
 {
     public static ChannelDto ToDto(this Channel channel)
     {
-        return new ChannelDto(channel.Id, channel.ServerId, channel.Name);
+        return new ChannelDto(channel.Id, channel.Name);
     }
 
     public static MessageDto ToDto(this Message message)
@@ -23,13 +23,13 @@ public static class ContractMappings
             message.DeletedAt);
     }
 
-    public static ServerDto ToDto(this Server server)
+    public static MembershipDto ToDto(this Membership membership)
     {
-        return new ServerDto(server.Id, server.Name);
+        return new MembershipDto(membership.UserId, membership.Role);
     }
 
-    public static ServerMembershipDto ToDto(this ServerMembership membership)
+    public static NodeDto ToDto(this NodeState nodeState)
     {
-        return new ServerMembershipDto(membership.ServerId, membership.UserId, membership.Role);
+        return new NodeDto(nodeState.Id, nodeState.Name);
     }
 }

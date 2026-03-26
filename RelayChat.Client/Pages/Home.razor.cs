@@ -1,83 +1,117 @@
 using Microsoft.AspNetCore.Components;
-using System.Net.Http.Json;
+using RelayChat.Client.Services;
 using RelayChat.Node.Contracts;
 
 namespace RelayChat.Client.Pages;
 
-public partial class Home : ComponentBase, IDisposable
+public partial class Home : ComponentBase
 {
-    private readonly Dictionary<Guid, List<ChannelDto>> channelsByServer = [];
-    private readonly Dictionary<Guid, ServerMembershipDto?> membershipsByServer = [];
-    private HttpClient? httpClient;
-    private string newServerName = string.Empty;
-
-    [Parameter]
-    public Guid? ServerId { get; set; }
+    [Inject]
+    public required AuthService AuthService { get; init; }
 
     [Inject]
-    public required NodeApiOptions NodeApiOptions { get; init; }
-
-    [Inject]
-    public required Services.ChatClient ChatClient { get; init; }
+    public required ControlPlaneApiClient ControlPlaneApiClient { get; init; }
 
     [Inject]
     public required NavigationManager NavigationManager { get; init; }
 
-    protected IReadOnlyList<ServerDto> _servers { get; private set; } = [];
-    protected IReadOnlyDictionary<Guid, List<ChannelDto>> _channelsByServer => channelsByServer;
-    protected ServerDto? _selectedServer { get; private set; }
-    protected IReadOnlyList<ChannelDto> _selectedChannels =>
-        _selectedServer is not null && channelsByServer.TryGetValue(_selectedServer.Id, out var channels)
-            ? channels
-            : [];
-    protected bool _isSelectedServerMember =>
-        _selectedServer is not null &&
-        membershipsByServer.TryGetValue(_selectedServer.Id, out var membership) &&
-        membership is not null;
-    protected ServerMembershipRole? _selectedMembershipRole =>
-        _selectedServer is not null &&
-        membershipsByServer.TryGetValue(_selectedServer.Id, out var membership) &&
-        membership is not null
-            ? membership.Role
-            : null;
-    protected string _newServerName
-    {
-        get => newServerName;
-        set => newServerName = value;
-    }
+    [Inject]
+    public required NodeApiClient NodeApiClient { get; init; }
+
+    protected bool _isAuthenticated { get; private set; }
+    protected string _nodeName { get; private set; } = "Relay";
+    protected MembershipDto? _membership { get; private set; }
+    protected IReadOnlyList<ChannelDto> _channels { get; private set; } = [];
     protected string? _errorMessage { get; private set; }
+    protected string? _profileStatusMessage { get; private set; }
+    protected string? _profileErrorMessage { get; private set; }
+    protected string _profileName { get; set; } = string.Empty;
+    protected string _profileHandle { get; set; } = string.Empty;
+    protected string? _profileAvatarUrl { get; set; }
+    protected string? _profileEmail { get; set; }
+    protected string _profilePreviewHandle => _profileHandle.Trim().TrimStart('@');
 
     protected override async Task OnInitializedAsync()
     {
-        httpClient = new HttpClient { BaseAddress = new Uri(NodeApiOptions.BaseUrl) };
+        await AuthService.Initialize();
         await LoadData();
     }
 
-    protected override Task OnParametersSetAsync()
+    protected void Login()
     {
-        SelectServer();
-        return Task.CompletedTask;
+        NavigationManager.NavigateTo(
+            AuthService.GetLoginUrl(NavigationManager.ToBaseRelativePath(NavigationManager.Uri)),
+            forceLoad: true);
+    }
+
+    protected async Task JoinNode()
+    {
+        if (!_isAuthenticated)
+        {
+            Login();
+            return;
+        }
+
+        _membership = await NodeApiClient.JoinNode();
+    }
+
+    protected async Task SaveProfile()
+    {
+        if (!_isAuthenticated)
+        {
+            Login();
+            return;
+        }
+
+        _profileStatusMessage = null;
+        _profileErrorMessage = null;
+
+        try
+        {
+            var profile = await ControlPlaneApiClient.UpdateCurrentUser(new UpdateProfileRequest(
+                _profileName,
+                _profileHandle,
+                _profileAvatarUrl));
+
+            if (profile is null)
+            {
+                return;
+            }
+
+            ApplyProfile(profile);
+            await AuthService.ApplyProfile(profile);
+            _profileStatusMessage = "Profile updated.";
+        }
+        catch (Exception ex)
+        {
+            _profileErrorMessage = ex.Message;
+        }
+    }
+
+    protected string GetChannelHref(Guid channelId)
+    {
+        return $"/channels/{channelId}";
     }
 
     private async Task LoadData()
     {
-        ArgumentNullException.ThrowIfNull(httpClient);
-
         try
         {
-            var servers = await httpClient.GetFromJsonAsync<List<ServerDto>>("/servers") ?? [];
-            _servers = servers;
+            _isAuthenticated = AuthService.IsAuthenticated;
+            var node = await NodeApiClient.GetNode();
+            _nodeName = node?.Name ?? "Relay";
+            _channels = await NodeApiClient.GetChannels();
+            _membership = _isAuthenticated ? await NodeApiClient.GetMembership() : null;
 
-            channelsByServer.Clear();
-            membershipsByServer.Clear();
-            foreach (var server in servers)
+            if (_isAuthenticated)
             {
-                var channels = await httpClient.GetFromJsonAsync<List<ChannelDto>>($"/servers/{server.Id}/channels") ?? [];
-                channelsByServer[server.Id] = channels;
-                membershipsByServer[server.Id] = await GetMembership(server.Id);
+                var profile = await ControlPlaneApiClient.GetCurrentUser();
+                if (profile is not null)
+                {
+                    ApplyProfile(profile);
+                    await AuthService.ApplyProfile(profile);
+                }
             }
-
-            SelectServer();
         }
         catch (Exception ex)
         {
@@ -85,68 +119,11 @@ public partial class Home : ComponentBase, IDisposable
         }
     }
 
-    public void Dispose()
+    private void ApplyProfile(UserProfileDto profile)
     {
-        httpClient?.Dispose();
-    }
-
-    protected string GetChannelHref(Guid serverId, Guid channelId)
-    {
-        return $"/servers/{serverId}/channels/{channelId}";
-    }
-
-    protected string GetServerHref(Guid serverId)
-    {
-        return $"/servers/{serverId}";
-    }
-
-    protected async Task CreateServer()
-    {
-        ArgumentNullException.ThrowIfNull(httpClient);
-
-        var request = new CreateServerRequest(newServerName.Trim(), ChatClient.UserId);
-        var result = await (await httpClient.PostAsJsonAsync("/servers", request)).Content
-            .ReadFromJsonAsync<CreateServerResultDto>();
-        if (result is null)
-        {
-            return;
-        }
-
-        newServerName = string.Empty;
-        NavigationManager.NavigateTo($"/servers/{result.Server.Id}/channels/{result.Channel.Id}");
-    }
-
-    protected async Task JoinSelectedServer()
-    {
-        ArgumentNullException.ThrowIfNull(httpClient);
-        if (_selectedServer is null)
-        {
-            return;
-        }
-
-        await httpClient.PostAsJsonAsync($"/servers/{_selectedServer.Id}/memberships", new JoinServerRequest(ChatClient.UserId));
-        await LoadData();
-        StateHasChanged();
-    }
-
-    private void SelectServer()
-    {
-        _selectedServer = ServerId.HasValue
-            ? _servers.FirstOrDefault(server => server.Id == ServerId.Value)
-            : _servers.FirstOrDefault();
-    }
-
-    private async Task<ServerMembershipDto?> GetMembership(Guid serverId)
-    {
-        ArgumentNullException.ThrowIfNull(httpClient);
-
-        var response = await httpClient.GetAsync($"/servers/{serverId}/memberships/{ChatClient.UserId}");
-        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
-        {
-            return null;
-        }
-
-        response.EnsureSuccessStatusCode();
-        return await response.Content.ReadFromJsonAsync<ServerMembershipDto>();
+        _profileName = profile.Name;
+        _profileHandle = profile.Handle;
+        _profileAvatarUrl = profile.AvatarUrl;
+        _profileEmail = profile.Email;
     }
 }

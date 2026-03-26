@@ -1,23 +1,31 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 using RelayChat.Node.Contracts;
 using RelayChat.Node.Database;
 
 namespace RelayChat.Node.Api;
 
+[Authorize]
 public sealed class ChatHub(
     ChannelRepository channelRepository,
     MessageRepository messageRepository,
-    ServerMembershipRepository membershipRepository) : Hub
+    MembershipRepository membershipRepository) : Hub
 {
     public async Task JoinChannel(JoinChannelRequest request)
     {
+        var user = Context.User;
+        if (user is null || !user.HasNodeAccess())
+        {
+            return;
+        }
+
         var channel = await channelRepository.Get(request.ChannelId);
         if (channel is null)
         {
             return;
         }
 
-        var membership = await membershipRepository.Get(channel.ServerId, request.AuthorId);
+        var membership = await membershipRepository.Get(user.GetRequiredUserId());
         if (membership is null)
         {
             return;
@@ -28,14 +36,21 @@ public sealed class ChatHub(
 
     public async Task SendMessage(SendMessageRequest request)
     {
+        var user = Context.User;
+        if (user is null || !user.HasNodeAccess())
+        {
+            return;
+        }
+
         var channel = await channelRepository.Get(request.ChannelId);
         if (channel is null)
         {
             return;
         }
 
-        var membership = await membershipRepository.Get(channel.ServerId, request.AuthorId);
-        if (membership is null || membership.Role is not ServerMembershipRole.Admin and not ServerMembershipRole.Member)
+        var userId = user.GetRequiredUserId();
+        var membership = await membershipRepository.Get(userId);
+        if (membership is null || membership.Role is not MembershipRole.Admin and not MembershipRole.Member)
         {
             return;
         }
@@ -44,7 +59,7 @@ public sealed class ChatHub(
         {
             Id = Guid.NewGuid(),
             ChannelId = request.ChannelId,
-            AuthorId = request.AuthorId,
+            AuthorId = userId,
             Content = request.Content,
             CreatedAt = DateTimeOffset.UtcNow,
             ClientMessageId = request.ClientMessageId
@@ -56,18 +71,25 @@ public sealed class ChatHub(
 
     public async Task EditMessage(EditMessageRequest request)
     {
+        var user = Context.User;
+        if (user is null || !user.HasNodeAccess())
+        {
+            return;
+        }
+
         var channel = await channelRepository.Get(request.ChannelId);
         if (channel is null)
         {
             return;
         }
 
-        var membership = await membershipRepository.Get(channel.ServerId, request.AuthorId);
+        var userId = user.GetRequiredUserId();
+        var membership = await membershipRepository.Get(userId);
         var message = await messageRepository.Get(request.ChannelId, request.MessageId);
         if (message is null ||
             membership is null ||
-            membership.Role is not ServerMembershipRole.Admin and not ServerMembershipRole.Member ||
-            message.AuthorId != request.AuthorId ||
+            membership.Role is not MembershipRole.Admin and not MembershipRole.Member ||
+            message.AuthorId != userId ||
             message.DeletedAt.HasValue)
         {
             return;
@@ -82,20 +104,27 @@ public sealed class ChatHub(
 
     public async Task DeleteMessage(DeleteMessageRequest request)
     {
+        var user = Context.User;
+        if (user is null || !user.HasNodeAccess())
+        {
+            return;
+        }
+
         var channel = await channelRepository.Get(request.ChannelId);
         if (channel is null)
         {
             return;
         }
 
-        var membership = await membershipRepository.Get(channel.ServerId, request.AuthorId);
+        var userId = user.GetRequiredUserId();
+        var membership = await membershipRepository.Get(userId);
         var message = await messageRepository.Get(request.ChannelId, request.MessageId);
         if (message is null || membership is null || message.DeletedAt.HasValue)
         {
             return;
         }
 
-        var canDelete = message.AuthorId == request.AuthorId || membership.Role == ServerMembershipRole.Admin;
+        var canDelete = message.AuthorId == userId || membership.Role == MembershipRole.Admin;
         if (!canDelete)
         {
             return;
