@@ -9,6 +9,7 @@ docker/authentik/.env
 docker/authentik/data/
 docker/authentik/certs/
 docker/authentik/schema.json
+docker/
 
 # User-specific files
 *.rsuser
