@@ -1,0 +1,437 @@
+.relay-shell {
+    display: grid;
+    grid-template-columns: 88px 280px minmax(0, 1fr) 280px;
+    min-height: 100vh;
+    background:
+        radial-gradient(circle at top left, rgba(43, 75, 108, 0.18), transparent 24%),
+        linear-gradient(180deg, #0c1219 0%, #101923 100%);
+    color: #eef3f8;
+}
+
+.relay-server-rail,
+.relay-sidebar,
+.relay-content,
+.relay-members {
+    min-height: 100vh;
+}
+
+.relay-server-rail {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    padding: 18px 12px;
+    background: rgba(5, 8, 12, 0.76);
+    border-right: 1px solid rgba(160, 175, 196, 0.1);
+}
+
+.relay-rail-button,
+.relay-server-pill {
+    width: 60px;
+    min-width: 60px;
+    height: 60px;
+    border: none;
+    border-radius: 20px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    background: rgba(19, 30, 42, 0.96);
+    color: #eef3f8;
+    text-decoration: none;
+    transition: transform 0.16s ease, border-radius 0.16s ease, background 0.16s ease;
+}
+
+.relay-rail-button span {
+    font-size: 10px;
+    line-height: 1;
+}
+
+.relay-rail-button:hover,
+.relay-server-pill:hover {
+    transform: translateY(-2px);
+    border-radius: 16px;
+    background: rgba(34, 52, 71, 0.96);
+}
+
+.relay-rail-button--primary,
+.relay-server-pill--active {
+    background: linear-gradient(180deg, #5b8cff 0%, #2f65ea 100%);
+}
+
+.relay-server-pill {
+    font-size: 22px;
+    font-weight: 700;
+}
+
+.relay-server-pill--action {
+    cursor: pointer;
+}
+
+.relay-rail-divider {
+    width: 38px;
+    height: 1px;
+    background: rgba(154, 164, 178, 0.2);
+    margin: 2px 0;
+}
+
+.relay-sidebar,
+.relay-members {
+    background: rgba(10, 15, 22, 0.82);
+    border-right: 1px solid rgba(160, 175, 196, 0.08);
+    padding: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+}
+
+.relay-members {
+    border-right: none;
+    border-left: 1px solid rgba(160, 175, 196, 0.08);
+}
+
+.relay-sidebar__header,
+.relay-members__header,
+.relay-channel-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.relay-sidebar__header h1,
+.relay-members__header h2,
+.relay-channel-header h2 {
+    margin: 0;
+    font-size: 24px;
+    line-height: 1.1;
+}
+
+.relay-eyebrow {
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    font-size: 11px;
+    color: #8f9bad;
+    margin-bottom: 8px;
+}
+
+.relay-empty-panel,
+.relay-state-card {
+    border: 1px solid rgba(160, 175, 196, 0.1);
+    border-radius: 22px;
+    background: rgba(15, 22, 31, 0.94);
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.relay-channel-create {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.relay-channel-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    overflow: auto;
+}
+
+.relay-channel-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 11px 12px;
+    border-radius: 14px;
+    color: #c8d1dd;
+    text-decoration: none;
+    border: 1px solid transparent;
+    transition: background 0.16s ease, border-color 0.16s ease;
+}
+
+.relay-channel-item:hover {
+    background: rgba(27, 39, 53, 0.9);
+    border-color: rgba(160, 175, 196, 0.08);
+}
+
+.relay-channel-item--active {
+    background: rgba(45, 70, 99, 0.92);
+    color: #f7fbff;
+}
+
+.relay-channel-item__icon {
+    width: 24px;
+    display: flex;
+    justify-content: center;
+}
+
+.relay-content {
+    min-width: 0;
+    padding: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+}
+
+.relay-message-scroll,
+.relay-voice-stage {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    border-radius: 26px;
+    border: 1px solid rgba(160, 175, 196, 0.08);
+    background: rgba(11, 17, 24, 0.94);
+    padding: 22px;
+}
+
+.relay-voice-stage {
+    display: flex;
+}
+
+.relay-voice-grid {
+    width: 100%;
+}
+
+.relay-voice-controls {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.relay-empty-messages {
+    min-height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #8f9bad;
+}
+
+.relay-day-divider {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 18px 0 22px;
+    color: #8f9bad;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+}
+
+.relay-day-divider::before,
+.relay-day-divider::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: rgba(160, 175, 196, 0.12);
+}
+
+.relay-message-group {
+    display: grid;
+    grid-template-columns: 52px minmax(0, 1fr);
+    gap: 14px;
+    margin-bottom: 18px;
+}
+
+.relay-message-group__avatar {
+    width: 52px;
+    height: 52px;
+    border-radius: 999px;
+    overflow: hidden;
+    background: #2a3442;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 20px;
+}
+
+.relay-message-group__avatar img,
+.relay-member-row__avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.relay-message-group__body {
+    min-width: 0;
+}
+
+.relay-message-group__header {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    margin-bottom: 6px;
+}
+
+.relay-message-group__author {
+    font-weight: 700;
+    color: #f5f7fa;
+}
+
+.relay-message-group__timestamp {
+    font-size: 12px;
+    color: #8f9bad;
+}
+
+.relay-message-group__messages {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.relay-message-line {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.relay-message-line__content {
+    white-space: pre-wrap;
+    line-height: 1.5;
+    color: #d8e0eb;
+}
+
+.relay-message-line__meta {
+    display: flex;
+    align-items: flex-start;
+    gap: 4px;
+    color: #8f9bad;
+    flex-shrink: 0;
+}
+
+.relay-message-line__state,
+.relay-message-line__edited {
+    font-size: 12px;
+    margin-top: 6px;
+}
+
+.relay-message-line__edit {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.relay-message-line__edit-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.relay-composer {
+    border-radius: 22px;
+    border: 1px solid rgba(160, 175, 196, 0.1);
+    background: rgba(15, 22, 31, 0.96);
+    padding: 12px 14px;
+}
+
+.relay-composer__input {
+    width: 100%;
+    min-height: 76px;
+    resize: none;
+    border: none;
+    outline: none;
+    background: transparent;
+    color: #f5f7fa;
+    font: inherit;
+    line-height: 1.5;
+}
+
+.relay-composer__input::placeholder {
+    color: #6f7b8a;
+}
+
+.relay-member-group {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.relay-member-group h3 {
+    margin: 0;
+    font-size: 12px;
+    color: #8f9bad;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+}
+
+.relay-member-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.relay-member-row__avatar {
+    width: 42px;
+    height: 42px;
+    border-radius: 999px;
+    overflow: hidden;
+    background: #2a3442;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+}
+
+.relay-member-row__body {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.relay-member-row__name {
+    color: #f5f7fa;
+}
+
+.relay-member-row__handle {
+    color: #8f9bad;
+    font-size: 13px;
+}
+
+@media (max-width: 1400px) {
+    .relay-shell {
+        grid-template-columns: 88px 250px minmax(0, 1fr) 240px;
+    }
+}
+
+@media (max-width: 1100px) {
+    .relay-shell {
+        grid-template-columns: 88px 250px minmax(0, 1fr);
+    }
+
+    .relay-members {
+        display: none;
+    }
+}
+
+@media (max-width: 860px) {
+    .relay-shell {
+        grid-template-columns: 1fr;
+    }
+
+    .relay-server-rail,
+    .relay-sidebar,
+    .relay-members {
+        min-height: auto;
+    }
+
+    .relay-server-rail {
+        flex-direction: row;
+        justify-content: flex-start;
+        overflow: auto;
+        border-right: none;
+        border-bottom: 1px solid rgba(160, 175, 196, 0.1);
+    }
+
+    .relay-rail-divider {
+        width: 1px;
+        height: 38px;
+    }
+
+    .relay-sidebar {
+        border-right: none;
+        border-bottom: 1px solid rgba(160, 175, 196, 0.08);
+    }
+}

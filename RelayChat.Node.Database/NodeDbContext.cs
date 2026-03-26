@@ -26,14 +26,16 @@ public sealed class NodeDbContext(DbContextOptions<NodeDbContext> options) : DbC
         {
             Id = NodeSeedData.DefaultTextChannelId,
             Name = "general",
-            Type = ChannelType.Text
+            Type = ChannelType.Text,
+            SortOrder = 0
         });
 
         modelBuilder.Entity<Channel>().HasData(new Channel
         {
             Id = NodeSeedData.DefaultVoiceChannelId,
             Name = "General Voice",
-            Type = ChannelType.Voice
+            Type = ChannelType.Voice,
+            SortOrder = 1
         });
     }
 }

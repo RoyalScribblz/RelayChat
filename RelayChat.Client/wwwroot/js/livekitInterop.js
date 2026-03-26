@@ -1,8 +1,12 @@
 let room = null;
 let dotNetRef = null;
 const attachedAudioElements = new Map();
-const attachedVideoElements = new Map();
+const videoPublications = new Map();
+const voiceParticipants = new Map();
+const activeSpeakerIds = new Set();
+const renderedVideoElements = [];
 let screenShareTracks = [];
+let focusedTileKey = null;
 
 function getAudioRoot() {
     let root = document.getElementById("livekit-audio-root");
@@ -17,7 +21,7 @@ function getAudioRoot() {
     return root;
 }
 
-function getTrackKey(publication, participant) {
+function getAudioTrackKey(publication, participant) {
     return publication?.trackSid ?? publication?.sid ?? participant?.identity ?? crypto.randomUUID();
 }
 
@@ -25,12 +29,53 @@ function getVideoRoot() {
     return document.getElementById("livekit-video-grid");
 }
 
+function getParticipantIdentity(participant) {
+    return participant?.identity ?? room?.localParticipant?.identity ?? null;
+}
+
+function normalizeVideoSource(track, publication) {
+    const source = publication?.source ?? track?.source ?? null;
+    if (source === window.LivekitClient?.Track?.Source?.Camera || source === "camera") {
+        return "camera";
+    }
+
+    if (source === window.LivekitClient?.Track?.Source?.ScreenShare || source === "screen_share") {
+        return "screen";
+    }
+
+    return null;
+}
+
+function getVideoPublicationKey(identity, source) {
+    return `${identity}|${source}`;
+}
+
+function getParticipantMeta(identity) {
+    const participant = voiceParticipants.get(identity);
+    if (participant) {
+        return participant;
+    }
+
+    return {
+        userId: identity,
+        name: identity,
+        handle: identity,
+        avatarUrl: null,
+        isMuted: false
+    };
+}
+
+function getParticipantInitial(participant) {
+    const value = participant?.name || participant?.handle || "?";
+    return value.substring(0, 1).toUpperCase();
+}
+
 function attachRemoteAudioTrack(track, publication, participant) {
     if (track.kind !== "audio") {
         return;
     }
 
-    const key = getTrackKey(publication, participant);
+    const key = getAudioTrackKey(publication, participant);
     if (attachedAudioElements.has(key)) {
         return;
     }
@@ -44,7 +89,7 @@ function attachRemoteAudioTrack(track, publication, participant) {
 }
 
 function detachRemoteAudioTrack(publication, participant) {
-    const key = getTrackKey(publication, participant);
+    const key = getAudioTrackKey(publication, participant);
     const existing = attachedAudioElements.get(key);
     if (!existing) {
         return;
@@ -64,29 +109,20 @@ function detachAllRemoteAudioTracks() {
     attachedAudioElements.clear();
 }
 
-function createVideoWrapper(label) {
-    const wrapper = document.createElement("div");
-    wrapper.style.position = "relative";
-    wrapper.style.borderRadius = "16px";
-    wrapper.style.overflow = "hidden";
-    wrapper.style.background = "#101418";
-    wrapper.style.aspectRatio = "16 / 9";
-    wrapper.style.minHeight = "180px";
+function clearRenderedVideoElements() {
+    for (const { element, track } of renderedVideoElements) {
+        track.detach(element);
+    }
 
-    const badge = document.createElement("div");
-    badge.textContent = label;
-    badge.style.position = "absolute";
-    badge.style.left = "12px";
-    badge.style.bottom = "12px";
-    badge.style.padding = "4px 8px";
-    badge.style.borderRadius = "999px";
-    badge.style.background = "rgba(0, 0, 0, 0.6)";
-    badge.style.color = "#fff";
-    badge.style.fontSize = "12px";
-    badge.style.zIndex = "1";
+    renderedVideoElements.length = 0;
+}
 
-    wrapper.appendChild(badge);
-    return wrapper;
+function notifyActiveSpeakersChanged() {
+    if (!dotNetRef) {
+        return;
+    }
+
+    dotNetRef.invokeMethodAsync("HandleActiveSpeakersChanged", [...activeSpeakerIds]);
 }
 
 function notifyVideoParticipantsChanged() {
@@ -94,61 +130,267 @@ function notifyVideoParticipantsChanged() {
         return;
     }
 
-    const identities = [...new Set([...attachedVideoElements.values()].map(entry => entry.identity).filter(identity => !!identity))];
+    const identities = [...new Set([...videoPublications.values()].map(entry => entry.identity))];
     dotNetRef.invokeMethodAsync("HandleVideoParticipantsChanged", identities);
 }
 
-function attachVideoTrack(track, publication, participant) {
-    if (track.kind !== "video") {
-        return;
+function createBadge(text, styles = {}) {
+    const badge = document.createElement("div");
+    badge.textContent = text;
+    badge.style.padding = "4px 8px";
+    badge.style.borderRadius = "999px";
+    badge.style.fontSize = "12px";
+    badge.style.fontWeight = "600";
+    badge.style.background = "rgba(7, 11, 16, 0.72)";
+    badge.style.color = "#f5f7fa";
+    for (const [key, value] of Object.entries(styles)) {
+        badge.style[key] = value;
     }
 
+    return badge;
+}
+
+function createPlaceholderAvatar(participant) {
+    if (participant.avatarUrl) {
+        const image = document.createElement("img");
+        image.src = participant.avatarUrl;
+        image.alt = participant.name;
+        image.style.width = "88px";
+        image.style.height = "88px";
+        image.style.borderRadius = "999px";
+        image.style.objectFit = "cover";
+        return image;
+    }
+
+    const avatar = document.createElement("div");
+    avatar.textContent = getParticipantInitial(participant);
+    avatar.style.width = "88px";
+    avatar.style.height = "88px";
+    avatar.style.borderRadius = "999px";
+    avatar.style.display = "flex";
+    avatar.style.alignItems = "center";
+    avatar.style.justifyContent = "center";
+    avatar.style.background = "#2a3442";
+    avatar.style.color = "#f5f7fa";
+    avatar.style.fontSize = "34px";
+    avatar.style.fontWeight = "700";
+    return avatar;
+}
+
+function buildVisualTiles() {
+    const tiles = [];
+
+    for (const participant of voiceParticipants.values()) {
+        const identity = participant.userId;
+        const cameraKey = getVideoPublicationKey(identity, "camera");
+        const screenKey = getVideoPublicationKey(identity, "screen");
+        const cameraPublication = videoPublications.get(cameraKey);
+        const screenPublication = videoPublications.get(screenKey);
+
+        tiles.push({
+            key: cameraPublication ? cameraKey : `${identity}|placeholder`,
+            identity,
+            type: cameraPublication ? "camera" : "placeholder",
+            label: participant.name,
+            participant,
+            videoPublication: cameraPublication ?? null
+        });
+
+        if (screenPublication) {
+            tiles.push({
+                key: screenKey,
+                identity,
+                type: "screen",
+                label: `${participant.name} is sharing`,
+                participant,
+                videoPublication: screenPublication
+            });
+        }
+    }
+
+    for (const publication of videoPublications.values()) {
+        if (voiceParticipants.has(publication.identity)) {
+            continue;
+        }
+
+        tiles.push({
+            key: publication.key,
+            identity: publication.identity,
+            type: publication.source === "screen" ? "screen" : "camera",
+            label: publication.identity,
+            participant: getParticipantMeta(publication.identity),
+            videoPublication: publication
+        });
+    }
+
+    return tiles;
+}
+
+function renderVideoGrid() {
     const root = getVideoRoot();
     if (!root) {
         return;
     }
 
-    const key = getTrackKey(publication, participant);
-    if (attachedVideoElements.has(key)) {
+    clearRenderedVideoElements();
+    root.replaceChildren();
+
+    const tiles = buildVisualTiles();
+    if (tiles.length === 0) {
+        const empty = document.createElement("div");
+        empty.textContent = "Nobody is connected to this call yet.";
+        empty.style.padding = "24px";
+        empty.style.border = "1px dashed rgba(154, 164, 178, 0.4)";
+        empty.style.borderRadius = "20px";
+        empty.style.color = "#9aa4b2";
+        empty.style.textAlign = "center";
+        root.appendChild(empty);
         return;
     }
 
-    const label = participant?.name || participant?.identity || "Video";
-    const wrapper = createVideoWrapper(label);
-    const element = track.attach();
-    element.autoplay = true;
-    element.muted = participant?.isLocal ?? false;
-    element.playsInline = true;
-    element.style.width = "100%";
-    element.style.height = "100%";
-    element.style.objectFit = "cover";
+    if (focusedTileKey && !tiles.some(tile => tile.key === focusedTileKey)) {
+        focusedTileKey = null;
+    }
 
-    wrapper.prepend(element);
-    root.appendChild(wrapper);
-    attachedVideoElements.set(key, { element, track, wrapper, identity: participant?.identity ?? null });
-    notifyVideoParticipantsChanged();
+    root.style.display = "grid";
+    root.style.gap = "16px";
+    root.style.gridTemplateColumns = focusedTileKey
+        ? "repeat(auto-fit, minmax(180px, 1fr))"
+        : "repeat(auto-fit, minmax(240px, 1fr))";
+
+    for (const tile of tiles) {
+        const participant = tile.participant;
+        const isFocused = focusedTileKey === tile.key;
+        const isSecondary = focusedTileKey && !isFocused;
+        const isSpeaking = activeSpeakerIds.has(tile.identity);
+
+        const wrapper = document.createElement("button");
+        wrapper.type = "button";
+        wrapper.style.position = "relative";
+        wrapper.style.display = "flex";
+        wrapper.style.alignItems = "stretch";
+        wrapper.style.justifyContent = "stretch";
+        wrapper.style.padding = "0";
+        wrapper.style.border = isSpeaking ? "2px solid #5edc93" : "1px solid rgba(154, 164, 178, 0.16)";
+        wrapper.style.borderRadius = "22px";
+        wrapper.style.overflow = "hidden";
+        wrapper.style.background = "#0f151d";
+        wrapper.style.cursor = "pointer";
+        wrapper.style.minHeight = isSecondary ? "160px" : "240px";
+        wrapper.style.boxShadow = isFocused
+            ? "0 22px 48px rgba(0, 0, 0, 0.35)"
+            : "0 12px 28px rgba(0, 0, 0, 0.18)";
+        wrapper.style.gridColumn = isFocused ? "1 / -1" : "auto";
+        wrapper.style.aspectRatio = isFocused ? "16 / 8" : "16 / 10";
+        wrapper.onclick = () => {
+            focusedTileKey = focusedTileKey === tile.key ? null : tile.key;
+            renderVideoGrid();
+        };
+
+        const body = document.createElement("div");
+        body.style.position = "relative";
+        body.style.flex = "1";
+        body.style.display = "flex";
+        body.style.alignItems = "center";
+        body.style.justifyContent = "center";
+        body.style.background = tile.type === "screen"
+            ? "#06080b"
+            : "linear-gradient(160deg, #0f151d 0%, #16212c 100%)";
+
+        if (tile.videoPublication) {
+            const element = tile.videoPublication.track.attach();
+            element.autoplay = true;
+            element.playsInline = true;
+            element.muted = tile.videoPublication.isLocal;
+            element.style.width = "100%";
+            element.style.height = "100%";
+            element.style.objectFit = tile.type === "screen" ? "contain" : "cover";
+            body.appendChild(element);
+            renderedVideoElements.push({ element, track: tile.videoPublication.track });
+        } else {
+            body.appendChild(createPlaceholderAvatar(participant));
+        }
+
+        const footer = document.createElement("div");
+        footer.style.position = "absolute";
+        footer.style.left = "14px";
+        footer.style.right = "14px";
+        footer.style.bottom = "14px";
+        footer.style.display = "flex";
+        footer.style.alignItems = "center";
+        footer.style.justifyContent = "space-between";
+        footer.style.gap = "8px";
+
+        const title = createBadge(tile.label, {
+            maxWidth: "70%",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap"
+        });
+
+        const badges = document.createElement("div");
+        badges.style.display = "flex";
+        badges.style.gap = "8px";
+        badges.style.flexWrap = "wrap";
+
+        if (tile.type === "screen") {
+            badges.appendChild(createBadge("Screen", { background: "rgba(77, 132, 255, 0.78)" }));
+        }
+
+        if (participant.isMuted) {
+            badges.appendChild(createBadge("Muted", { background: "rgba(255, 170, 66, 0.82)" }));
+        }
+
+        if (isSpeaking) {
+            badges.appendChild(createBadge("Speaking", { background: "rgba(47, 189, 99, 0.84)" }));
+        }
+
+        footer.appendChild(title);
+        footer.appendChild(badges);
+        body.appendChild(footer);
+        wrapper.appendChild(body);
+        root.appendChild(wrapper);
+    }
 }
 
-function detachVideoTrack(publication, participant) {
-    const key = getTrackKey(publication, participant);
-    const existing = attachedVideoElements.get(key);
-    if (!existing) {
+function upsertVideoPublication(track, publication, participant, isLocal = false) {
+    if (track.kind !== "video") {
         return;
     }
 
-    existing.track.detach(existing.element);
-    existing.wrapper.remove();
-    attachedVideoElements.delete(key);
-    notifyVideoParticipantsChanged();
-}
-
-function detachAllVideoTracks() {
-    for (const { element, track, wrapper } of attachedVideoElements.values()) {
-        track.detach(element);
-        wrapper.remove();
+    const identity = getParticipantIdentity(participant);
+    const source = normalizeVideoSource(track, publication);
+    if (!identity || !source) {
+        return;
     }
 
-    attachedVideoElements.clear();
+    const key = getVideoPublicationKey(identity, source);
+    videoPublications.set(key, {
+        key,
+        identity,
+        source,
+        track,
+        isLocal
+    });
+    notifyVideoParticipantsChanged();
+    renderVideoGrid();
+}
+
+function removeVideoPublication(publication, participant, track) {
+    const identity = getParticipantIdentity(participant);
+    const source = normalizeVideoSource(track, publication);
+    if (!identity || !source) {
+        return;
+    }
+
+    videoPublications.delete(getVideoPublicationKey(identity, source));
+    notifyVideoParticipantsChanged();
+    renderVideoGrid();
+}
+
+function clearVideoPublications() {
+    videoPublications.clear();
+    focusedTileKey = null;
     notifyVideoParticipantsChanged();
 }
 
@@ -167,30 +409,33 @@ export async function joinVoiceChannel(serverUrl, token, dotNetObjectReference) 
 
     room.on(window.LivekitClient.RoomEvent.TrackSubscribed, (track, publication, participant) => {
         attachRemoteAudioTrack(track, publication, participant);
-        attachVideoTrack(track, publication, participant);
+        upsertVideoPublication(track, publication, participant, false);
     });
 
-    room.on(window.LivekitClient.RoomEvent.TrackUnsubscribed, (_track, publication, participant) => {
+    room.on(window.LivekitClient.RoomEvent.TrackUnsubscribed, (track, publication, participant) => {
         detachRemoteAudioTrack(publication, participant);
-        detachVideoTrack(publication, participant);
+        removeVideoPublication(publication, participant, track);
     });
 
     room.on(window.LivekitClient.RoomEvent.ParticipantDisconnected, participant => {
         for (const publication of participant.trackPublications.values()) {
             detachRemoteAudioTrack(publication, participant);
-            detachVideoTrack(publication, participant);
+            if (publication.track) {
+                removeVideoPublication(publication, participant, publication.track);
+            }
         }
     });
 
     room.on(window.LivekitClient.RoomEvent.ActiveSpeakersChanged, participants => {
-        if (!dotNetRef) {
-            return;
+        activeSpeakerIds.clear();
+        for (const participant of participants) {
+            if (participant.identity) {
+                activeSpeakerIds.add(participant.identity);
+            }
         }
 
-        const identities = participants
-            .map(participant => participant.identity)
-            .filter(identity => !!identity);
-        dotNetRef.invokeMethodAsync("HandleActiveSpeakersChanged", identities);
+        notifyActiveSpeakersChanged();
+        renderVideoGrid();
     });
 
     await room.connect(serverUrl, token);
@@ -200,10 +445,12 @@ export async function joinVoiceChannel(serverUrl, token, dotNetObjectReference) 
         for (const publication of participant.trackPublications.values()) {
             if (publication.track) {
                 attachRemoteAudioTrack(publication.track, publication, participant);
-                attachVideoTrack(publication.track, publication, participant);
+                upsertVideoPublication(publication.track, publication, participant, false);
             }
         }
     }
+
+    renderVideoGrid();
 
     if (!room.canPlaybackAudio) {
         try {
@@ -217,7 +464,10 @@ export async function joinVoiceChannel(serverUrl, token, dotNetObjectReference) 
 export async function leaveVoiceChannel() {
     if (!room) {
         detachAllRemoteAudioTracks();
-        detachAllVideoTracks();
+        clearVideoPublications();
+        voiceParticipants.clear();
+        activeSpeakerIds.clear();
+        renderVideoGrid();
         if (dotNetRef) {
             await dotNetRef.invokeMethodAsync("HandleActiveSpeakersChanged", []);
             await dotNetRef.invokeMethodAsync("HandleVideoParticipantsChanged", []);
@@ -228,12 +478,24 @@ export async function leaveVoiceChannel() {
     await stopScreenShare();
     await room.disconnect();
     detachAllRemoteAudioTracks();
-    detachAllVideoTracks();
+    clearVideoPublications();
+    voiceParticipants.clear();
+    activeSpeakerIds.clear();
     room = null;
+    renderVideoGrid();
     if (dotNetRef) {
         await dotNetRef.invokeMethodAsync("HandleActiveSpeakersChanged", []);
         await dotNetRef.invokeMethodAsync("HandleVideoParticipantsChanged", []);
     }
+}
+
+export function setVoiceParticipants(participants) {
+    voiceParticipants.clear();
+    for (const participant of participants) {
+        voiceParticipants.set(participant.userId, participant);
+    }
+
+    renderVideoGrid();
 }
 
 export async function setVoiceMuted(isMuted) {
@@ -253,11 +515,11 @@ export async function setCameraEnabled(isEnabled) {
 
     const publication = room.localParticipant.getTrackPublication(window.LivekitClient.Track.Source.Camera);
     if (!isEnabled || !publication?.track) {
-        detachVideoTrack(publication, room.localParticipant);
+        removeVideoPublication(publication, room.localParticipant, publication?.track ?? null);
         return;
     }
 
-    attachVideoTrack(publication.track, publication, room.localParticipant);
+    upsertVideoPublication(publication.track, publication, room.localParticipant, true);
 }
 
 async function stopScreenShare() {
@@ -272,6 +534,8 @@ async function stopScreenShare() {
         } catch {
             // Ignore unpublish failures during teardown.
         }
+
+        removeVideoPublication({ source: track.source }, room.localParticipant, track);
 
         try {
             track.stop();
@@ -316,7 +580,18 @@ export async function setScreenShareEnabled(isEnabled) {
     }
 
     for (const track of tracks) {
-        await room.localParticipant.publishTrack(track);
+        const publication = await room.localParticipant.publishTrack(track);
+        if (track.kind === "video") {
+            upsertVideoPublication(track, publication, room.localParticipant, true);
+        }
+
+        const mediaStreamTrack = track.mediaStreamTrack;
+        if (mediaStreamTrack) {
+            mediaStreamTrack.addEventListener("ended", async () => {
+                await stopScreenShare();
+                renderVideoGrid();
+            }, { once: true });
+        }
     }
 
     screenShareTracks = tracks;

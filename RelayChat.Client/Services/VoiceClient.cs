@@ -69,6 +69,16 @@ public sealed class VoiceClient(IJSRuntime jsRuntime) : IAsyncDisposable
         IsCameraEnabled = isEnabled;
     }
 
+    public async Task SetVoiceParticipants(IReadOnlyList<VoiceParticipantDto> participants)
+    {
+        if (module is null)
+        {
+            return;
+        }
+
+        await module.InvokeVoidAsync("setVoiceParticipants", participants);
+    }
+
     public async Task<ScreenShareResult> SetScreenShareEnabled(bool isEnabled)
     {
         if (module is null)

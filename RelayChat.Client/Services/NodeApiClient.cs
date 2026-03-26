@@ -46,6 +46,15 @@ public sealed class NodeApiClient(AuthService authService, NodeApiOptions option
         return await response.Content.ReadFromJsonAsync<MembershipDto>(ct);
     }
 
+    public async Task<List<MembershipDto>> GetMembers(CancellationToken ct = default)
+    {
+        using var client = CreateClient();
+        client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", await authService.GetNodeToken());
+
+        return await client.GetFromJsonAsync<List<MembershipDto>>("/memberships", ct) ?? [];
+    }
+
     public async Task<VoiceChannelStateDto?> GetVoiceChannelState(Guid channelId, CancellationToken ct = default)
     {
         using var client = CreateClient();
@@ -106,6 +115,17 @@ public sealed class NodeApiClient(AuthService authService, NodeApiOptions option
         using var response = await client.PostAsJsonAsync("/channels", request, ct);
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadFromJsonAsync<ChannelDto>(ct);
+    }
+
+    public async Task<List<ChannelDto>> ReorderChannels(IReadOnlyList<Guid> channelIds, CancellationToken ct = default)
+    {
+        using var client = CreateClient();
+        client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", await authService.GetNodeToken());
+
+        using var response = await client.PutAsJsonAsync("/channels/order", new ReorderChannelsRequest(channelIds), ct);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<List<ChannelDto>>(ct) ?? [];
     }
 
     private HttpClient CreateClient()

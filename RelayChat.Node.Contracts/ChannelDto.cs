@@ -1,3 +1,3 @@
 namespace RelayChat.Node.Contracts;
 
-public sealed record ChannelDto(Guid Id, string Name, ChannelType Type);
+public sealed record ChannelDto(Guid Id, string Name, ChannelType Type, int SortOrder);

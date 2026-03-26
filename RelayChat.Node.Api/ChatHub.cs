@@ -32,6 +32,12 @@ public sealed class ChatHub(
             return;
         }
 
+        await membershipRepository.SyncProfile(
+            user.GetRequiredUserId(),
+            user.GetDisplayName(),
+            user.GetHandle(),
+            user.GetAvatarUrl());
+
         await Groups.AddToGroupAsync(Context.ConnectionId, request.ChannelId.ToString());
     }
 
@@ -54,6 +60,12 @@ public sealed class ChatHub(
         {
             return;
         }
+
+        await membershipRepository.SyncProfile(
+            user.GetRequiredUserId(),
+            user.GetDisplayName(),
+            user.GetHandle(),
+            user.GetAvatarUrl());
 
         await voicePresenceService.Join(channelId, user, Context.ConnectionId);
     }
@@ -101,6 +113,17 @@ public sealed class ChatHub(
             return;
         }
 
+        await membershipRepository.SyncProfile(
+            userId,
+            user.GetDisplayName(),
+            user.GetHandle(),
+            user.GetAvatarUrl());
+        membership = await membershipRepository.Get(userId);
+        if (membership is null)
+        {
+            return;
+        }
+
         var message = new Message
         {
             Id = Guid.NewGuid(),
@@ -112,7 +135,7 @@ public sealed class ChatHub(
         };
 
         await messageRepository.Add(message);
-        await Clients.Group(request.ChannelId.ToString()).SendAsync("ReceiveMessage", message.ToDto());
+        await Clients.Group(request.ChannelId.ToString()).SendAsync("ReceiveMessage", message.ToDto(membership));
     }
 
     public async Task EditMessage(EditMessageRequest request)
@@ -145,7 +168,13 @@ public sealed class ChatHub(
         message.EditedAt = DateTimeOffset.UtcNow;
 
         await messageRepository.SaveChanges();
-        await Clients.Group(request.ChannelId.ToString()).SendAsync("ReceiveMessageUpdated", message.ToDto());
+        await membershipRepository.SyncProfile(
+            userId,
+            user.GetDisplayName(),
+            user.GetHandle(),
+            user.GetAvatarUrl());
+        membership = await membershipRepository.Get(userId);
+        await Clients.Group(request.ChannelId.ToString()).SendAsync("ReceiveMessageUpdated", message.ToDto(membership));
     }
 
     public async Task DeleteMessage(DeleteMessageRequest request)
@@ -179,7 +208,8 @@ public sealed class ChatHub(
         message.DeletedAt = DateTimeOffset.UtcNow;
 
         await messageRepository.SaveChanges();
-        await Clients.Group(request.ChannelId.ToString()).SendAsync("ReceiveMessageUpdated", message.ToDto());
+        var authorMembership = await membershipRepository.Get(message.AuthorId);
+        await Clients.Group(request.ChannelId.ToString()).SendAsync("ReceiveMessageUpdated", message.ToDto(authorMembership));
     }
 
     public override async Task OnDisconnectedAsync(Exception? exception)

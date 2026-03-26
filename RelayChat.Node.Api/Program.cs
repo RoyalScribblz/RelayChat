@@ -120,6 +120,35 @@ app.MapGet("/channels", async (ChannelRepository repository, CancellationToken c
     var channels = await repository.GetAll(ct);
     return Results.Ok(channels.Select(channel => channel.ToDto()));
 });
+app.MapPut("/channels/order", [Authorize] async (
+    ReorderChannelsRequest request,
+    ClaimsPrincipal user,
+    ChannelRepository channelRepository,
+    MembershipRepository membershipRepository,
+    CancellationToken ct) =>
+{
+    if (!user.HasNodeAccess())
+    {
+        return Results.Forbid();
+    }
+
+    var membership = await membershipRepository.Get(user.GetRequiredUserId(), ct);
+    if (membership?.Role != MembershipRole.Admin)
+    {
+        return Results.Forbid();
+    }
+
+    await membershipRepository.SyncProfile(
+        user.GetRequiredUserId(),
+        user.GetDisplayName(),
+        user.GetHandle(),
+        user.GetAvatarUrl(),
+        ct);
+
+    await channelRepository.Reorder(request.ChannelIds, ct);
+    var channels = await channelRepository.GetAll(ct);
+    return Results.Ok(channels.Select(channel => channel.ToDto()));
+});
 app.MapPost("/channels", [Authorize] async (
     CreateChannelRequest request,
     ClaimsPrincipal user,
@@ -137,6 +166,13 @@ app.MapPost("/channels", [Authorize] async (
     {
         return Results.Forbid();
     }
+
+    await membershipRepository.SyncProfile(
+        user.GetRequiredUserId(),
+        user.GetDisplayName(),
+        user.GetHandle(),
+        user.GetAvatarUrl(),
+        ct);
 
     var channelName = request.Name.Trim();
     if (string.IsNullOrWhiteSpace(channelName))
@@ -165,7 +201,48 @@ app.MapGet("/memberships/me", [Authorize] async (
     }
 
     var membership = await membershipRepository.Get(user.GetRequiredUserId(), ct);
+    if (membership is not null)
+    {
+        await membershipRepository.SyncProfile(
+            user.GetRequiredUserId(),
+            user.GetDisplayName(),
+            user.GetHandle(),
+            user.GetAvatarUrl(),
+            ct);
+        membership = await membershipRepository.Get(user.GetRequiredUserId(), ct);
+    }
+
     return membership is null ? Results.NotFound() : Results.Ok(membership.ToDto());
+});
+app.MapGet("/memberships", [Authorize] async (
+    ClaimsPrincipal user,
+    MembershipRepository membershipRepository,
+    CancellationToken ct) =>
+{
+    if (!user.HasNodeAccess())
+    {
+        return Results.Forbid();
+    }
+
+    var membership = await membershipRepository.Get(user.GetRequiredUserId(), ct);
+    if (membership is null)
+    {
+        return Results.Forbid();
+    }
+
+    await membershipRepository.SyncProfile(
+        user.GetRequiredUserId(),
+        user.GetDisplayName(),
+        user.GetHandle(),
+        user.GetAvatarUrl(),
+        ct);
+
+    var memberships = await membershipRepository.GetAll(ct);
+    return Results.Ok(memberships
+        .OrderBy(current => current.Role)
+        .ThenBy(current => current.Name)
+        .ThenBy(current => current.Handle)
+        .Select(current => current.ToDto()));
 });
 app.MapPost("/memberships", [Authorize] async (
     ClaimsPrincipal user,
@@ -185,7 +262,13 @@ app.MapPost("/memberships", [Authorize] async (
     }
 
     var role = await membershipRepository.Any(ct) ? MembershipRole.Member : MembershipRole.Admin;
-    var membership = await membershipRepository.Add(userId, role, ct);
+    var membership = await membershipRepository.Add(
+        userId,
+        role,
+        user.GetDisplayName(),
+        user.GetHandle(),
+        user.GetAvatarUrl(),
+        ct);
     return Results.Ok(membership.ToDto());
 });
 app.MapGet("/channels/{channelId:guid}/messages", [Authorize] async (
@@ -210,6 +293,13 @@ app.MapGet("/channels/{channelId:guid}/messages", [Authorize] async (
         return Results.Forbid();
     }
 
+    await membershipRepository.SyncProfile(
+        user.GetRequiredUserId(),
+        user.GetDisplayName(),
+        user.GetHandle(),
+        user.GetAvatarUrl(),
+        ct);
+
     var channel = await channelRepository.Get(channelId, ct);
     if (channel is null)
     {
@@ -222,10 +312,12 @@ app.MapGet("/channels/{channelId:guid}/messages", [Authorize] async (
     }
 
     var messages = await repository.GetByChannel(channelId, before, after, limit, ct);
+    var memberships = await membershipRepository.GetByUserIds(messages.Select(message => message.AuthorId).Distinct().ToArray(), ct);
+    var membershipByUserId = memberships.ToDictionary(current => current.UserId);
     return Results.Ok(messages
         .OrderBy(message => message.CreatedAt)
         .ThenBy(message => message.Id)
-        .Select(message => message.ToDto()));
+        .Select(message => message.ToDto(membershipByUserId.GetValueOrDefault(message.AuthorId))));
 });
 app.MapGet("/voice/channels/{channelId:guid}", [Authorize] async (
     Guid channelId,
@@ -245,6 +337,13 @@ app.MapGet("/voice/channels/{channelId:guid}", [Authorize] async (
     {
         return Results.Forbid();
     }
+
+    await membershipRepository.SyncProfile(
+        user.GetRequiredUserId(),
+        user.GetDisplayName(),
+        user.GetHandle(),
+        user.GetAvatarUrl(),
+        ct);
 
     var channel = await channelRepository.Get(channelId, ct);
     if (channel is null)
@@ -277,6 +376,13 @@ app.MapPost("/voice/channels/{channelId:guid}/access", [Authorize] async (
     {
         return Results.Forbid();
     }
+
+    await membershipRepository.SyncProfile(
+        user.GetRequiredUserId(),
+        user.GetDisplayName(),
+        user.GetHandle(),
+        user.GetAvatarUrl(),
+        ct);
 
     var channel = await channelRepository.Get(channelId, ct);
     if (channel is null)
