@@ -52,14 +52,22 @@ app.MapGet("/servers/{serverId:guid}/channels", async (Guid serverId, ChannelRep
     var channels = await repository.GetByServer(serverId, ct);
     return Results.Ok(channels.Select(ChannelDto.FromChannel));
 });
-app.MapGet("/channels/{channelId:guid}/messages", async (
+app.MapGet("/servers/{serverId:guid}/channels/{channelId:guid}/messages", async (
+    Guid serverId,
     Guid channelId,
     Guid? before,
     Guid? after,
     int? limit,
+    ChannelRepository channelRepository,
     MessageRepository repository,
     CancellationToken ct) =>
 {
+    var channel = await channelRepository.Get(serverId, channelId, ct);
+    if (channel is null)
+    {
+        return Results.NotFound();
+    }
+
     var messages = await repository.GetByChannel(channelId, before, after, limit, ct);
     return Results.Ok(messages
         .OrderBy(message => message.CreatedAt)

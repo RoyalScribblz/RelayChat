@@ -1,11 +1,33 @@
-@page "/chat"
+@page "/servers/{ServerId:guid}/channels/{ChannelId:guid}"
 
 <PageTitle>Chat</PageTitle>
 
 <MudContainer MaxWidth="MaxWidth.Medium" Class="py-6">
     <MudStack Spacing="3">
-        <MudText Typo="Typo.h3">RelayChat</MudText>
-        <MudText Typo="Typo.body2">Channel: @_channelId</MudText>
+        <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center">
+            <MudStack Spacing="0">
+                <MudText Typo="Typo.h3">@_serverName</MudText>
+                <MudText Typo="Typo.body2">#@_channelName</MudText>
+            </MudStack>
+            <MudButton Variant="Variant.Outlined" Href="/">Browse</MudButton>
+        </MudStack>
+
+        @if (_channels.Count > 0)
+        {
+            <MudPaper Class="pa-3" Outlined="true">
+                <MudStack Row="true" Wrap="Wrap.Wrap" Spacing="1">
+                    @foreach (var channel in _channels)
+                    {
+                        <MudChip T="string"
+                                 Href="@GetChannelHref(channel)"
+                                 Variant="@(channel.Id == _channelId ? Variant.Filled : Variant.Outlined)"
+                                 Color="@(channel.Id == _channelId ? Color.Primary : Color.Default)">
+                            #@channel.Name
+                        </MudChip>
+                    }
+                </MudStack>
+            </MudPaper>
+        }
 
         <MudPaper Class="pa-4" Outlined="true">
             <MudStack Spacing="2">

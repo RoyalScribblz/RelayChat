@@ -10,9 +10,16 @@ public partial class Chat : ComponentBase, IDisposable
 {
     private const int HistoryPageSize = 100;
     private readonly List<ChatMessage> messages = [];
-    private Guid channelId;
+    private readonly List<ChannelDto> channels = [];
+    private Guid? joinedChannelId;
     private string messageText = string.Empty;
     private HttpClient? httpClient;
+
+    [Parameter]
+    public Guid ServerId { get; set; }
+
+    [Parameter]
+    public Guid ChannelId { get; set; }
 
     [Inject]
     public required ChatClient ChatClient { get; init; }
@@ -20,7 +27,10 @@ public partial class Chat : ComponentBase, IDisposable
     [Inject]
     public required NodeApiOptions NodeApiOptions { get; init; }
 
-    protected Guid _channelId => channelId;
+    protected Guid _channelId => ChannelId;
+    protected string _serverName { get; private set; } = string.Empty;
+    protected string _channelName { get; private set; } = string.Empty;
+    protected IReadOnlyList<ChannelDto> _channels => channels;
     protected IReadOnlyList<ChatMessage> _messages => messages;
     protected string _messageText
     {
@@ -33,8 +43,19 @@ public partial class Chat : ComponentBase, IDisposable
         httpClient = new HttpClient { BaseAddress = new Uri(NodeApiOptions.BaseUrl) };
         ChatClient.MessageReceived += OnMessageReceived;
         ChatClient.Reconnected += OnReconnected;
+    }
 
-        channelId = await ResolveChannelId();
+    protected override async Task OnParametersSetAsync()
+    {
+        ArgumentNullException.ThrowIfNull(httpClient);
+
+        await LoadChannelContext();
+        if (joinedChannelId != ChannelId)
+        {
+            messages.Clear();
+            messageText = string.Empty;
+        }
+
         var history = await GetMessages(limit: HistoryPageSize);
         messages.Clear();
         foreach (var message in history)
@@ -42,7 +63,8 @@ public partial class Chat : ComponentBase, IDisposable
             MergeConfirmedMessage(message);
         }
 
-        await ChatClient.JoinChannel(channelId);
+        await ChatClient.JoinChannel(ChannelId);
+        joinedChannelId = ChannelId;
     }
 
     protected async Task SendMessage()
@@ -57,7 +79,7 @@ public partial class Chat : ComponentBase, IDisposable
         {
             Message = new MessageDto(
                 Guid.NewGuid(),
-                channelId,
+                ChannelId,
                 ChatClient.UserId,
                 content,
                 DateTimeOffset.UtcNow,
@@ -104,7 +126,7 @@ public partial class Chat : ComponentBase, IDisposable
 
     private void OnMessageReceived(MessageDto message)
     {
-        if (message.ChannelId != channelId)
+        if (message.ChannelId != ChannelId)
         {
             return;
         }
@@ -234,7 +256,7 @@ public partial class Chat : ComponentBase, IDisposable
             query.Add($"limit={limit.Value}");
         }
 
-        var path = $"/channels/{channelId}/messages";
+        var path = $"/servers/{ServerId}/channels/{ChannelId}/messages";
         if (query.Count > 0)
         {
             path = $"{path}?{string.Join("&", query)}";
@@ -253,18 +275,26 @@ public partial class Chat : ComponentBase, IDisposable
             .FirstOrDefault();
     }
 
-    private async Task<Guid> ResolveChannelId()
+    private async Task LoadChannelContext()
     {
         ArgumentNullException.ThrowIfNull(httpClient);
 
         var servers = await httpClient.GetFromJsonAsync<List<ServerDto>>("/servers") ?? [];
-        var server = servers.FirstOrDefault()
-            ?? throw new InvalidOperationException("No servers were returned by the node API.");
+        var server = servers.FirstOrDefault(current => current.Id == ServerId)
+            ?? throw new InvalidOperationException($"Server '{ServerId}' was not returned by the node API.");
 
-        var channels = await httpClient.GetFromJsonAsync<List<ChannelDto>>($"/servers/{server.Id}/channels") ?? [];
-        var channel = channels.FirstOrDefault()
-            ?? throw new InvalidOperationException("No channels were returned by the node API.");
+        var availableChannels = await httpClient.GetFromJsonAsync<List<ChannelDto>>($"/servers/{ServerId}/channels") ?? [];
+        var channel = availableChannels.FirstOrDefault(current => current.Id == ChannelId)
+            ?? throw new InvalidOperationException($"Channel '{ChannelId}' was not returned by the node API.");
 
-        return channel.Id;
+        _serverName = server.Name;
+        _channelName = channel.Name;
+        channels.Clear();
+        channels.AddRange(availableChannels);
+    }
+
+    protected string GetChannelHref(ChannelDto channel)
+    {
+        return $"/servers/{ServerId}/channels/{channel.Id}";
     }
 }

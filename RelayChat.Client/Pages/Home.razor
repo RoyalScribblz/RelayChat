@@ -1,14 +1,49 @@
 @page "/"
 
-<PageTitle>Home</PageTitle>
+<PageTitle>RelayChat</PageTitle>
 
-<MudText Typo="Typo.h3" GutterBottom="true">Hello, world!</MudText>
-<MudText Class="mb-8">Welcome to your new app, powered by MudBlazor and the .NET 10 Template!</MudText>
+<MudContainer MaxWidth="MaxWidth.Medium" Class="py-6">
+    <MudStack Spacing="3">
+        <MudText Typo="Typo.h3">RelayChat</MudText>
+        <MudText Typo="Typo.body1">Select a server and channel to open chat.</MudText>
 
+        @if (!string.IsNullOrWhiteSpace(_errorMessage))
+        {
+            <MudAlert Severity="Severity.Error">@_errorMessage</MudAlert>
+        }
+        else if (_servers.Count == 0)
+        {
+            <MudText Typo="Typo.body2">No servers available.</MudText>
+        }
+        else
+        {
+            @foreach (var server in _servers)
+            {
+                <MudPaper Class="pa-4" Outlined="true">
+                    <MudStack Spacing="2">
+                        <MudText Typo="Typo.h5">@server.Name</MudText>
 
-<MudAlert Severity="Severity.Normal" ContentAlignment="HorizontalAlignment.Start">
-    You can find documentation and examples on our website here:
-    <MudLink Href="https://mudblazor.com" Target="_blank" Typo="Typo.body2" Color="Color.Primary">
-        <b>www.mudblazor.com</b>
-    </MudLink>
-</MudAlert>
+                        @if (_channelsByServer.TryGetValue(server.Id, out var channels) && channels.Count > 0)
+                        {
+                            <MudStack Row="true" Wrap="Wrap.Wrap" Spacing="1">
+                                @foreach (var channel in channels)
+                                {
+                                    <MudChip T="string"
+                                             Href="@GetChannelHref(server.Id, channel.Id)"
+                                             Variant="Variant.Outlined"
+                                             Color="Color.Primary">
+                                        #@channel.Name
+                                    </MudChip>
+                                }
+                            </MudStack>
+                        }
+                        else
+                        {
+                            <MudText Typo="Typo.body2">No channels available.</MudText>
+                        }
+                    </MudStack>
+                </MudPaper>
+            }
+        }
+    </MudStack>
+</MudContainer>
