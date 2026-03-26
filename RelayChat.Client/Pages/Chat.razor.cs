@@ -11,6 +11,7 @@ public partial class Chat : ComponentBase, IDisposable
     private const int HistoryPageSize = 100;
     private readonly List<ChatMessage> messages = [];
     private readonly List<ChannelDto> channels = [];
+    private readonly List<ServerDto> servers = [];
     private Guid? joinedChannelId;
     private string messageText = string.Empty;
     private HttpClient? httpClient;
@@ -28,6 +29,7 @@ public partial class Chat : ComponentBase, IDisposable
     public required NodeApiOptions NodeApiOptions { get; init; }
 
     protected Guid _channelId => ChannelId;
+    protected IReadOnlyList<ServerDto> _servers => servers;
     protected string _serverName { get; private set; } = string.Empty;
     protected string _channelName { get; private set; } = string.Empty;
     protected IReadOnlyList<ChannelDto> _channels => channels;
@@ -280,6 +282,9 @@ public partial class Chat : ComponentBase, IDisposable
         ArgumentNullException.ThrowIfNull(httpClient);
 
         var servers = await httpClient.GetFromJsonAsync<List<ServerDto>>("/servers") ?? [];
+        this.servers.Clear();
+        this.servers.AddRange(servers);
+
         var server = servers.FirstOrDefault(current => current.Id == ServerId)
             ?? throw new InvalidOperationException($"Server '{ServerId}' was not returned by the node API.");
 
@@ -296,5 +301,15 @@ public partial class Chat : ComponentBase, IDisposable
     protected string GetChannelHref(ChannelDto channel)
     {
         return $"/servers/{ServerId}/channels/{channel.Id}";
+    }
+
+    protected string GetServerHref(ServerDto server)
+    {
+        if (server.Id == ServerId && channels.Count > 0)
+        {
+            return GetChannelHref(channels[0]);
+        }
+
+        return $"/servers/{server.Id}";
     }
 }
