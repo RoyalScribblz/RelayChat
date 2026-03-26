@@ -72,12 +72,59 @@
                                     <MudStack Spacing="1">
                                         <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center">
                                             <MudText Typo="Typo.caption">@message.Message.AuthorId</MudText>
-                                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="@GetStateColor(message.State)">
-                                                @message.State
-                                            </MudChip>
+                                            <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
+                                                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="@GetStateColor(message.State)">
+                                                    @message.State
+                                                </MudChip>
+                                                @if (CanEditMessage(message))
+                                                {
+                                                    <MudIconButton Icon="@Icons.Material.Rounded.Edit"
+                                                                   Size="Size.Small"
+                                                                   Color="Color.Default"
+                                                                   OnClick="@(() => BeginEdit(message))" />
+                                                }
+                                                @if (CanDeleteMessage(message))
+                                                {
+                                                    <MudIconButton Icon="@Icons.Material.Rounded.Delete"
+                                                                   Size="Size.Small"
+                                                                   Color="Color.Error"
+                                                                   OnClick="@(() => DeleteMessage(message))" />
+                                                }
+                                            </MudStack>
                                         </MudStack>
-                                        <MudText Typo="Typo.body1">@message.Message.Content</MudText>
-                                        <MudText Typo="Typo.caption">@message.Message.CreatedAt.ToLocalTime().ToString("u")</MudText>
+                                        @if (_editingMessageId == message.Message.Id)
+                                        {
+                                            <MudStack Row="true" Spacing="2" AlignItems="AlignItems.End">
+                                                <MudTextField @bind-Value="_editText"
+                                                              Variant="Variant.Outlined"
+                                                              FullWidth="true"
+                                                              Immediate="true" />
+                                                <MudButton Variant="Variant.Filled"
+                                                           Color="Color.Primary"
+                                                           OnClick="SaveEdit">
+                                                    Save
+                                                </MudButton>
+                                                <MudButton Variant="Variant.Text"
+                                                           OnClick="CancelEdit">
+                                                    Cancel
+                                                </MudButton>
+                                            </MudStack>
+                                        }
+                                        else
+                                        {
+                                            <MudText Typo="Typo.body1">@GetMessageBody(message)</MudText>
+                                        }
+                                        <MudStack Row="true" Spacing="1">
+                                            <MudText Typo="Typo.caption">@message.Message.CreatedAt.ToLocalTime().ToString("u")</MudText>
+                                            @if (message.Message.EditedAt.HasValue)
+                                            {
+                                                <MudText Typo="Typo.caption">(edited)</MudText>
+                                            }
+                                            @if (message.Message.DeletedAt.HasValue)
+                                            {
+                                                <MudText Typo="Typo.caption">(deleted)</MudText>
+                                            }
+                                        </MudStack>
                                     </MudStack>
                                 </MudPaper>
                             }

@@ -24,6 +24,7 @@ builder.Services.AddDbContext<NodeDbContext>(options => options.UseNpgsql(connec
 builder.Services.AddSignalR();
 builder.Services.AddScoped<ChannelRepository>();
 builder.Services.AddScoped<MessageRepository>();
+builder.Services.AddScoped<ServerMembershipRepository>();
 builder.Services.AddScoped<ServerRepository>();
 
 var app = builder.Build();
@@ -51,6 +52,22 @@ app.MapGet("/servers/{serverId:guid}/channels", async (Guid serverId, ChannelRep
 {
     var channels = await repository.GetByServer(serverId, ct);
     return Results.Ok(channels.Select(ChannelDto.FromChannel));
+});
+app.MapGet("/servers/{serverId:guid}/memberships/{userId:guid}", async (
+    Guid serverId,
+    Guid userId,
+    ServerRepository serverRepository,
+    ServerMembershipRepository membershipRepository,
+    CancellationToken ct) =>
+{
+    var server = await serverRepository.Get(serverId, ct);
+    if (server is null)
+    {
+        return Results.NotFound();
+    }
+
+    var membership = await membershipRepository.GetOrCreate(serverId, userId, ct);
+    return Results.Ok(ServerMembershipDto.FromMembership(membership));
 });
 app.MapGet("/servers/{serverId:guid}/channels/{channelId:guid}/messages", async (
     Guid serverId,

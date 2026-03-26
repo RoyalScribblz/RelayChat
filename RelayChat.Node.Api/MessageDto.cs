@@ -8,7 +8,9 @@ public sealed record MessageDto(
     Guid AuthorId,
     string Content,
     DateTimeOffset CreatedAt,
-    Guid? ClientMessageId)
+    Guid? ClientMessageId,
+    DateTimeOffset? EditedAt,
+    DateTimeOffset? DeletedAt)
 {
     public static MessageDto FromMessage(Message message)
     {
@@ -18,6 +20,8 @@ public sealed record MessageDto(
             message.AuthorId,
             message.Content,
             message.CreatedAt,
-            message.ClientMessageId);
+            message.ClientMessageId,
+            message.EditedAt,
+            message.DeletedAt);
     }
 }

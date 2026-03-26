@@ -13,7 +13,9 @@ public partial class Chat : ComponentBase, IDisposable
     private readonly List<ChannelDto> channels = [];
     private readonly List<ServerDto> servers = [];
     private Guid? joinedChannelId;
+    private Guid? editingMessageId;
     private string messageText = string.Empty;
+    private string editText = string.Empty;
     private HttpClient? httpClient;
 
     [Parameter]
@@ -30,10 +32,17 @@ public partial class Chat : ComponentBase, IDisposable
 
     protected Guid _channelId => ChannelId;
     protected IReadOnlyList<ServerDto> _servers => servers;
+    protected ServerMembershipRole _membershipRole { get; private set; } = ServerMembershipRole.Member;
     protected string _serverName { get; private set; } = string.Empty;
     protected string _channelName { get; private set; } = string.Empty;
     protected IReadOnlyList<ChannelDto> _channels => channels;
     protected IReadOnlyList<ChatMessage> _messages => messages;
+    protected Guid? _editingMessageId => editingMessageId;
+    protected string _editText
+    {
+        get => editText;
+        set => editText = value;
+    }
     protected string _messageText
     {
         get => messageText;
@@ -44,6 +53,7 @@ public partial class Chat : ComponentBase, IDisposable
     {
         httpClient = new HttpClient { BaseAddress = new Uri(NodeApiOptions.BaseUrl) };
         ChatClient.MessageReceived += OnMessageReceived;
+        ChatClient.MessageUpdated += OnMessageUpdated;
         ChatClient.Reconnected += OnReconnected;
     }
 
@@ -56,6 +66,8 @@ public partial class Chat : ComponentBase, IDisposable
         {
             messages.Clear();
             messageText = string.Empty;
+            editingMessageId = null;
+            editText = string.Empty;
         }
 
         var history = await GetMessages(limit: HistoryPageSize);
@@ -85,7 +97,9 @@ public partial class Chat : ComponentBase, IDisposable
                 ChatClient.UserId,
                 content,
                 DateTimeOffset.UtcNow,
-                Guid.NewGuid()),
+                Guid.NewGuid(),
+                null,
+                null),
             State = MessageState.Pending,
             IsOwnMessage = true
         };
@@ -122,6 +136,7 @@ public partial class Chat : ComponentBase, IDisposable
     public void Dispose()
     {
         ChatClient.MessageReceived -= OnMessageReceived;
+        ChatClient.MessageUpdated -= OnMessageUpdated;
         ChatClient.Reconnected -= OnReconnected;
         httpClient?.Dispose();
     }
@@ -137,6 +152,22 @@ public partial class Chat : ComponentBase, IDisposable
         _ = InvokeAsync(StateHasChanged);
     }
 
+    private void OnMessageUpdated(MessageDto message)
+    {
+        if (message.ChannelId != ChannelId)
+        {
+            return;
+        }
+
+        MergeConfirmedMessage(message);
+        if (editingMessageId == message.Id)
+        {
+            CancelEdit();
+        }
+
+        _ = InvokeAsync(StateHasChanged);
+    }
+
     protected Color GetStateColor(MessageState state)
     {
         return state switch
@@ -146,6 +177,51 @@ public partial class Chat : ComponentBase, IDisposable
             MessageState.Failed => Color.Error,
             _ => Color.Default
         };
+    }
+
+    protected string GetMessageBody(ChatMessage message)
+    {
+        return message.Message.DeletedAt.HasValue ? "[deleted]" : message.Message.Content;
+    }
+
+    protected void BeginEdit(ChatMessage message)
+    {
+        editingMessageId = message.Message.Id;
+        editText = message.Message.Content;
+    }
+
+    protected void CancelEdit()
+    {
+        editingMessageId = null;
+        editText = string.Empty;
+    }
+
+    protected async Task SaveEdit()
+    {
+        if (!editingMessageId.HasValue)
+        {
+            return;
+        }
+
+        var content = editText.Trim();
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            return;
+        }
+
+        await ChatClient.EditMessage(new EditMessageRequest(
+            ChannelId,
+            editingMessageId.Value,
+            ChatClient.UserId,
+            content));
+    }
+
+    protected async Task DeleteMessage(ChatMessage message)
+    {
+        await ChatClient.DeleteMessage(new DeleteMessageRequest(
+            ChannelId,
+            message.Message.Id,
+            ChatClient.UserId));
     }
 
     private ChatMessage ToChatMessage(MessageDto message, MessageState state)
@@ -180,12 +256,9 @@ public partial class Chat : ComponentBase, IDisposable
         var existing = messages.FirstOrDefault(current => current.Message.Id == message.Id);
         if (existing is not null)
         {
-            if (existing.State != MessageState.Confirmed)
-            {
-                existing.Message = message;
-                existing.State = MessageState.Confirmed;
-                SortMessages();
-            }
+            existing.Message = message;
+            existing.State = MessageState.Confirmed;
+            SortMessages();
 
             return;
         }
@@ -291,9 +364,12 @@ public partial class Chat : ComponentBase, IDisposable
         var availableChannels = await httpClient.GetFromJsonAsync<List<ChannelDto>>($"/servers/{ServerId}/channels") ?? [];
         var channel = availableChannels.FirstOrDefault(current => current.Id == ChannelId)
             ?? throw new InvalidOperationException($"Channel '{ChannelId}' was not returned by the node API.");
+        var membership = await httpClient.GetFromJsonAsync<ServerMembershipDto>($"/servers/{ServerId}/memberships/{ChatClient.UserId}")
+            ?? throw new InvalidOperationException($"Membership for user '{ChatClient.UserId}' was not returned by the node API.");
 
         _serverName = server.Name;
         _channelName = channel.Name;
+        _membershipRole = membership.Role;
         channels.Clear();
         channels.AddRange(availableChannels);
     }
@@ -311,5 +387,20 @@ public partial class Chat : ComponentBase, IDisposable
         }
 
         return $"/servers/{server.Id}";
+    }
+
+    protected bool CanEditMessage(ChatMessage message)
+    {
+        return message.IsOwnMessage && !message.Message.DeletedAt.HasValue;
+    }
+
+    protected bool CanDeleteMessage(ChatMessage message)
+    {
+        if (message.Message.DeletedAt.HasValue)
+        {
+            return false;
+        }
+
+        return message.IsOwnMessage || _membershipRole == ServerMembershipRole.Admin;
     }
 }

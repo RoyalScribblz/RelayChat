@@ -6,4 +6,6 @@ public sealed record MessageDto(
     Guid AuthorId,
     string Content,
     DateTimeOffset CreatedAt,
-    Guid? ClientMessageId);
+    Guid? ClientMessageId,
+    DateTimeOffset? EditedAt,
+    DateTimeOffset? DeletedAt);

@@ -13,6 +13,19 @@ public sealed class MessageRepository(NodeDbContext dbContext)
         await dbContext.SaveChangesAsync(ct);
     }
 
+    public Task<Message?> Get(Guid channelId, Guid messageId, CancellationToken ct = default)
+    {
+        return dbContext.Messages
+            .SingleOrDefaultAsync(
+                message => message.ChannelId == channelId && message.Id == messageId,
+                ct);
+    }
+
+    public Task SaveChanges(CancellationToken ct = default)
+    {
+        return dbContext.SaveChangesAsync(ct);
+    }
+
     public async Task<List<Message>> GetByChannel(
         Guid channelId,
         Guid? before = null,
