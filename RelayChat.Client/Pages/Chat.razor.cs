@@ -14,6 +14,7 @@ public partial class Chat : ComponentBase, IAsyncDisposable
     private readonly List<VoiceParticipantDto> voiceParticipants = [];
     private HashSet<Guid> activeSpeakerIds = [];
     private HashSet<Guid> videoParticipantIds = [];
+    private bool shareScreenWithAudio = true;
     private Guid? joinedChannelId;
     private string messageText = string.Empty;
     private string editText = string.Empty;
@@ -50,6 +51,12 @@ public partial class Chat : ComponentBase, IAsyncDisposable
     protected bool _isConnectedToVoiceChannel => VoiceClient.ActiveChannelId == ChannelId;
     protected bool _isVoiceMuted => VoiceClient.IsMuted;
     protected bool _isCameraEnabled => VoiceClient.IsCameraEnabled;
+    protected bool _isScreenShareEnabled => VoiceClient.IsScreenShareEnabled;
+    protected bool _shareScreenWithAudio
+    {
+        get => shareScreenWithAudio;
+        set => shareScreenWithAudio = value;
+    }
     protected IReadOnlyList<ChannelDto> _channels => channels;
     protected IReadOnlyList<ChatMessage> _messages => messages;
     protected IReadOnlyList<VoiceParticipantDto> _voiceParticipants => voiceParticipants;
@@ -209,6 +216,13 @@ public partial class Chat : ComponentBase, IAsyncDisposable
     {
         var newCameraState = !VoiceClient.IsCameraEnabled;
         await VoiceClient.SetCameraEnabled(newCameraState);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    protected async Task ToggleScreenShare()
+    {
+        var newScreenShareState = !VoiceClient.IsScreenShareEnabled;
+        await VoiceClient.SetScreenShareEnabled(newScreenShareState, shareScreenWithAudio);
         await InvokeAsync(StateHasChanged);
     }
 

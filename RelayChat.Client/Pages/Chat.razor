@@ -116,6 +116,12 @@
                                            Disabled="@(!_isConnectedToVoiceChannel)">
                                     @(_isCameraEnabled ? "Camera Off" : "Camera On")
                                 </MudButton>
+                                <MudButton Variant="Variant.Filled"
+                                           Color="@(_isScreenShareEnabled ? Color.Info : Color.Default)"
+                                           OnClick="ToggleScreenShare"
+                                           Disabled="@(!_isConnectedToVoiceChannel)">
+                                    @(_isScreenShareEnabled ? "Stop Sharing" : "Share Screen")
+                                </MudButton>
                                 <MudButton Variant="Variant.Outlined"
                                            Color="Color.Error"
                                            OnClick="DisconnectVoice"
@@ -123,6 +129,11 @@
                                     Leave Voice
                                 </MudButton>
                             </MudStack>
+                            <MudSwitch T="bool"
+                                       @bind-Value="_shareScreenWithAudio"
+                                       Color="Color.Primary"
+                                       Disabled="@(_isScreenShareEnabled)"
+                                       Label="Share audio" />
                         </MudStack>
                     </MudPaper>
 

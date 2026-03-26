@@ -11,6 +11,7 @@ public sealed class VoiceClient(IJSRuntime jsRuntime) : IAsyncDisposable
     public Guid? ActiveChannelId { get; private set; }
     public bool IsMuted { get; private set; }
     public bool IsCameraEnabled { get; private set; }
+    public bool IsScreenShareEnabled { get; private set; }
     public bool IsConnected => ActiveChannelId.HasValue;
     public event Action<IReadOnlySet<Guid>>? ActiveSpeakersChanged;
     public event Action<IReadOnlySet<Guid>>? VideoParticipantsChanged;
@@ -23,6 +24,7 @@ public sealed class VoiceClient(IJSRuntime jsRuntime) : IAsyncDisposable
         ActiveChannelId = channelId;
         IsMuted = false;
         IsCameraEnabled = false;
+        IsScreenShareEnabled = false;
     }
 
     public async Task Leave()
@@ -38,6 +40,7 @@ public sealed class VoiceClient(IJSRuntime jsRuntime) : IAsyncDisposable
         ActiveChannelId = null;
         IsMuted = false;
         IsCameraEnabled = false;
+        IsScreenShareEnabled = false;
         ActiveSpeakersChanged?.Invoke(new HashSet<Guid>());
         VideoParticipantsChanged?.Invoke(new HashSet<Guid>());
     }
@@ -62,6 +65,17 @@ public sealed class VoiceClient(IJSRuntime jsRuntime) : IAsyncDisposable
 
         await module.InvokeVoidAsync("setCameraEnabled", isEnabled);
         IsCameraEnabled = isEnabled;
+    }
+
+    public async Task SetScreenShareEnabled(bool isEnabled, bool shareAudio)
+    {
+        if (module is null)
+        {
+            return;
+        }
+
+        await module.InvokeVoidAsync("setScreenShareEnabled", isEnabled, shareAudio);
+        IsScreenShareEnabled = isEnabled;
     }
 
     [JSInvokable]

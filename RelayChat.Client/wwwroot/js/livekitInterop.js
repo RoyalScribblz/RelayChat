@@ -2,6 +2,7 @@ let room = null;
 let dotNetRef = null;
 const attachedAudioElements = new Map();
 const attachedVideoElements = new Map();
+let screenShareTracks = [];
 
 function getAudioRoot() {
     let root = document.getElementById("livekit-audio-root");
@@ -93,7 +94,8 @@ function notifyVideoParticipantsChanged() {
         return;
     }
 
-    dotNetRef.invokeMethodAsync("HandleVideoParticipantsChanged", [...attachedVideoElements.keys()]);
+    const identities = [...new Set([...attachedVideoElements.values()].map(entry => entry.identity).filter(identity => !!identity))];
+    dotNetRef.invokeMethodAsync("HandleVideoParticipantsChanged", identities);
 }
 
 function attachVideoTrack(track, publication, participant) {
@@ -123,7 +125,7 @@ function attachVideoTrack(track, publication, participant) {
 
     wrapper.prepend(element);
     root.appendChild(wrapper);
-    attachedVideoElements.set(key, { element, track, wrapper });
+    attachedVideoElements.set(key, { element, track, wrapper, identity: participant?.identity ?? null });
     notifyVideoParticipantsChanged();
 }
 
@@ -218,16 +220,19 @@ export async function leaveVoiceChannel() {
         detachAllVideoTracks();
         if (dotNetRef) {
             await dotNetRef.invokeMethodAsync("HandleActiveSpeakersChanged", []);
+            await dotNetRef.invokeMethodAsync("HandleVideoParticipantsChanged", []);
         }
         return;
     }
 
+    await stopScreenShare();
     await room.disconnect();
     detachAllRemoteAudioTracks();
     detachAllVideoTracks();
     room = null;
     if (dotNetRef) {
         await dotNetRef.invokeMethodAsync("HandleActiveSpeakersChanged", []);
+        await dotNetRef.invokeMethodAsync("HandleVideoParticipantsChanged", []);
     }
 }
 
@@ -253,4 +258,49 @@ export async function setCameraEnabled(isEnabled) {
     }
 
     attachVideoTrack(publication.track, publication, room.localParticipant);
+}
+
+async function stopScreenShare() {
+    if (!room || screenShareTracks.length === 0) {
+        screenShareTracks = [];
+        return;
+    }
+
+    for (const track of screenShareTracks) {
+        try {
+            await room.localParticipant.unpublishTrack(track, true);
+        } catch {
+            // Ignore unpublish failures during teardown.
+        }
+
+        try {
+            track.stop();
+        } catch {
+            // Ignore track stop failures during teardown.
+        }
+    }
+
+    screenShareTracks = [];
+}
+
+export async function setScreenShareEnabled(isEnabled, shareAudio) {
+    if (!room) {
+        return;
+    }
+
+    if (!isEnabled) {
+        await stopScreenShare();
+        return;
+    }
+
+    await stopScreenShare();
+    const tracks = await room.localParticipant.createScreenTracks({
+        audio: shareAudio
+    });
+
+    for (const track of tracks) {
+        await room.localParticipant.publishTrack(track);
+    }
+
+    screenShareTracks = tracks;
 }
