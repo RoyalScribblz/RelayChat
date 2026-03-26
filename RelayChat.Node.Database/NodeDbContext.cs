@@ -4,5 +4,23 @@ namespace RelayChat.Node.Database;
 
 public sealed class NodeDbContext(DbContextOptions<NodeDbContext> options) : DbContext(options)
 {
+    public DbSet<Channel> Channels => Set<Channel>();
     public DbSet<Message> Messages => Set<Message>();
+    public DbSet<Server> Servers => Set<Server>();
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<Server>().HasData(new Server
+        {
+            Id = NodeSeedData.DefaultServerId,
+            Name = "Relay"
+        });
+
+        modelBuilder.Entity<Channel>().HasData(new Channel
+        {
+            Id = NodeSeedData.DefaultChannelId,
+            ServerId = NodeSeedData.DefaultServerId,
+            Name = "general"
+        });
+    }
 }

@@ -7,10 +7,10 @@ public sealed class ChatClient : IAsyncDisposable
     private readonly HubConnection connection;
     private Guid? joinedChannelId;
 
-    public ChatClient()
+    public ChatClient(NodeApiOptions options)
     {
         connection = new HubConnectionBuilder()
-            .WithUrl("http://localhost:5002/chathub")
+            .WithUrl($"{options.BaseUrl.TrimEnd('/')}/chathub")
             .WithAutomaticReconnect()
             .Build();
 

@@ -22,7 +22,9 @@ builder.Services.AddDbContext<NodeDbContext>(options => options.UseNpgsql(connec
     npgsql.MigrationsAssembly(typeof(NodeDbContext).Assembly.FullName);
 }));
 builder.Services.AddSignalR();
+builder.Services.AddScoped<ChannelRepository>();
 builder.Services.AddScoped<MessageRepository>();
+builder.Services.AddScoped<ServerRepository>();
 
 var app = builder.Build();
 
@@ -40,6 +42,16 @@ app.UseSwaggerUI(c =>
 app.UseCors();
 
 app.MapGet("/", () => "OK");
+app.MapGet("/servers", async (ServerRepository repository, CancellationToken ct) =>
+{
+    var servers = await repository.GetAll(ct);
+    return Results.Ok(servers.Select(ServerDto.FromServer));
+});
+app.MapGet("/servers/{serverId:guid}/channels", async (Guid serverId, ChannelRepository repository, CancellationToken ct) =>
+{
+    var channels = await repository.GetByServer(serverId, ct);
+    return Results.Ok(channels.Select(ChannelDto.FromChannel));
+});
 app.MapGet("/channels/{channelId:guid}/messages", async (
     Guid channelId,
     Guid? before,

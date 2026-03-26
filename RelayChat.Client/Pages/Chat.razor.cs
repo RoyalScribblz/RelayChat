@@ -8,16 +8,19 @@ namespace RelayChat.Client.Pages;
 
 public partial class Chat : ComponentBase, IDisposable
 {
-    private static readonly Guid ChannelId = Guid.Parse("11111111-1111-1111-1111-111111111111");
     private const int HistoryPageSize = 100;
-    private readonly HttpClient httpClient = new() { BaseAddress = new Uri("http://localhost:5002") };
     private readonly List<ChatMessage> messages = [];
+    private Guid channelId;
     private string messageText = string.Empty;
+    private HttpClient? httpClient;
 
     [Inject]
     public required ChatClient ChatClient { get; init; }
 
-    protected Guid _channelId => ChannelId;
+    [Inject]
+    public required NodeApiOptions NodeApiOptions { get; init; }
+
+    protected Guid _channelId => channelId;
     protected IReadOnlyList<ChatMessage> _messages => messages;
     protected string _messageText
     {
@@ -27,9 +30,11 @@ public partial class Chat : ComponentBase, IDisposable
 
     protected override async Task OnInitializedAsync()
     {
+        httpClient = new HttpClient { BaseAddress = new Uri(NodeApiOptions.BaseUrl) };
         ChatClient.MessageReceived += OnMessageReceived;
         ChatClient.Reconnected += OnReconnected;
 
+        channelId = await ResolveChannelId();
         var history = await GetMessages(limit: HistoryPageSize);
         messages.Clear();
         foreach (var message in history)
@@ -37,7 +42,7 @@ public partial class Chat : ComponentBase, IDisposable
             MergeConfirmedMessage(message);
         }
 
-        await ChatClient.JoinChannel(ChannelId);
+        await ChatClient.JoinChannel(channelId);
     }
 
     protected async Task SendMessage()
@@ -52,7 +57,7 @@ public partial class Chat : ComponentBase, IDisposable
         {
             Message = new MessageDto(
                 Guid.NewGuid(),
-                ChannelId,
+                channelId,
                 ChatClient.UserId,
                 content,
                 DateTimeOffset.UtcNow,
@@ -94,12 +99,12 @@ public partial class Chat : ComponentBase, IDisposable
     {
         ChatClient.MessageReceived -= OnMessageReceived;
         ChatClient.Reconnected -= OnReconnected;
-        httpClient.Dispose();
+        httpClient?.Dispose();
     }
 
     private void OnMessageReceived(MessageDto message)
     {
-        if (message.ChannelId != ChannelId)
+        if (message.ChannelId != channelId)
         {
             return;
         }
@@ -211,6 +216,8 @@ public partial class Chat : ComponentBase, IDisposable
 
     private async Task<List<MessageDto>> GetMessages(Guid? before = null, Guid? after = null, int? limit = null)
     {
+        ArgumentNullException.ThrowIfNull(httpClient);
+
         var query = new List<string>();
         if (before.HasValue)
         {
@@ -227,7 +234,7 @@ public partial class Chat : ComponentBase, IDisposable
             query.Add($"limit={limit.Value}");
         }
 
-        var path = $"/channels/{ChannelId}/messages";
+        var path = $"/channels/{channelId}/messages";
         if (query.Count > 0)
         {
             path = $"{path}?{string.Join("&", query)}";
@@ -244,5 +251,20 @@ public partial class Chat : ComponentBase, IDisposable
             .ThenByDescending(message => message.Message.Id)
             .Select(message => (Guid?)message.Message.Id)
             .FirstOrDefault();
+    }
+
+    private async Task<Guid> ResolveChannelId()
+    {
+        ArgumentNullException.ThrowIfNull(httpClient);
+
+        var servers = await httpClient.GetFromJsonAsync<List<ServerDto>>("/servers") ?? [];
+        var server = servers.FirstOrDefault()
+            ?? throw new InvalidOperationException("No servers were returned by the node API.");
+
+        var channels = await httpClient.GetFromJsonAsync<List<ChannelDto>>($"/servers/{server.Id}/channels") ?? [];
+        var channel = channels.FirstOrDefault()
+            ?? throw new InvalidOperationException("No channels were returned by the node API.");
+
+        return channel.Id;
     }
 }
