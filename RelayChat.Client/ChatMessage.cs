@@ -1,3 +1,5 @@
+using RelayChat.Node.Contracts;
+
 namespace RelayChat.Client;
 
 public sealed class ChatMessage

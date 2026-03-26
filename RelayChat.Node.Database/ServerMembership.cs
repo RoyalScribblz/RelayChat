@@ -1,3 +1,5 @@
+using RelayChat.Node.Contracts;
+
 namespace RelayChat.Node.Database;
 
 public sealed class ServerMembership

@@ -1,4 +1,4 @@
-namespace RelayChat.Client;
+namespace RelayChat.Node.Contracts;
 
 public sealed record MessageDto(
     Guid Id,

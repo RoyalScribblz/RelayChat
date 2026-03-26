@@ -1,4 +1,4 @@
-namespace RelayChat.Node.Database;
+namespace RelayChat.Node.Contracts;
 
 public enum ServerMembershipRole
 {

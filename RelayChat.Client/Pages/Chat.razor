@@ -29,8 +29,24 @@
                 <MudStack Spacing="2">
                     <MudStack Spacing="0">
                         <MudText Typo="Typo.h6">@_serverName</MudText>
-                        <MudText Typo="Typo.body2">Channels</MudText>
+                        <MudText Typo="Typo.body2">Role: @_membershipRole</MudText>
                     </MudStack>
+
+                    @if (_membershipRole == ServerMembershipRole.Admin)
+                    {
+                        <MudStack Row="true" Spacing="2" AlignItems="AlignItems.End">
+                            <MudTextField @bind-Value="_newChannelName"
+                                          Label="New channel"
+                                          Variant="Variant.Outlined"
+                                          FullWidth="true" />
+                            <MudButton Variant="Variant.Filled"
+                                       Color="Color.Primary"
+                                       OnClick="CreateChannel"
+                                       Disabled="@string.IsNullOrWhiteSpace(_newChannelName)">
+                                Add
+                            </MudButton>
+                        </MudStack>
+                    }
 
                     <MudList T="string">
                         @foreach (var channel in _channels)
@@ -58,94 +74,103 @@
                     </MudStack>
                 </MudPaper>
 
-                <MudPaper Class="pa-4" Outlined="true">
-                    <MudStack Spacing="2">
-                        @if (_messages.Count == 0)
-                        {
-                            <MudText Typo="Typo.body2">No messages yet.</MudText>
-                        }
-                        else
-                        {
-                            @foreach (var message in _messages)
+                @if (!_hasMembership)
+                {
+                    <MudAlert Severity="Severity.Warning">
+                        Join this server from the browse page before opening channels.
+                    </MudAlert>
+                }
+                else
+                {
+                    <MudPaper Class="pa-4" Outlined="true">
+                        <MudStack Spacing="2">
+                            @if (_messages.Count == 0)
                             {
-                                <MudPaper Class="pa-3" Outlined="true">
-                                    <MudStack Spacing="1">
-                                        <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center">
-                                            <MudText Typo="Typo.caption">@message.Message.AuthorId</MudText>
-                                            <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
-                                                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="@GetStateColor(message.State)">
-                                                    @message.State
-                                                </MudChip>
-                                                @if (CanEditMessage(message))
-                                                {
-                                                    <MudIconButton Icon="@Icons.Material.Rounded.Edit"
-                                                                   Size="Size.Small"
-                                                                   Color="Color.Default"
-                                                                   OnClick="@(() => BeginEdit(message))" />
-                                                }
-                                                @if (CanDeleteMessage(message))
-                                                {
-                                                    <MudIconButton Icon="@Icons.Material.Rounded.Delete"
-                                                                   Size="Size.Small"
-                                                                   Color="Color.Error"
-                                                                   OnClick="@(() => DeleteMessage(message))" />
-                                                }
-                                            </MudStack>
-                                        </MudStack>
-                                        @if (_editingMessageId == message.Message.Id)
-                                        {
-                                            <MudStack Row="true" Spacing="2" AlignItems="AlignItems.End">
-                                                <MudTextField @bind-Value="_editText"
-                                                              Variant="Variant.Outlined"
-                                                              FullWidth="true"
-                                                              Immediate="true" />
-                                                <MudButton Variant="Variant.Filled"
-                                                           Color="Color.Primary"
-                                                           OnClick="SaveEdit">
-                                                    Save
-                                                </MudButton>
-                                                <MudButton Variant="Variant.Text"
-                                                           OnClick="CancelEdit">
-                                                    Cancel
-                                                </MudButton>
-                                            </MudStack>
-                                        }
-                                        else
-                                        {
-                                            <MudText Typo="Typo.body1">@GetMessageBody(message)</MudText>
-                                        }
-                                        <MudStack Row="true" Spacing="1">
-                                            <MudText Typo="Typo.caption">@message.Message.CreatedAt.ToLocalTime().ToString("u")</MudText>
-                                            @if (message.Message.EditedAt.HasValue)
-                                            {
-                                                <MudText Typo="Typo.caption">(edited)</MudText>
-                                            }
-                                            @if (message.Message.DeletedAt.HasValue)
-                                            {
-                                                <MudText Typo="Typo.caption">(deleted)</MudText>
-                                            }
-                                        </MudStack>
-                                    </MudStack>
-                                </MudPaper>
+                                <MudText Typo="Typo.body2">No messages yet.</MudText>
                             }
-                        }
-                    </MudStack>
-                </MudPaper>
+                            else
+                            {
+                                @foreach (var message in _messages)
+                                {
+                                    <MudPaper Class="pa-3" Outlined="true">
+                                        <MudStack Spacing="1">
+                                            <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center">
+                                                <MudText Typo="Typo.caption">@message.Message.AuthorId</MudText>
+                                                <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
+                                                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="@GetStateColor(message.State)">
+                                                        @message.State
+                                                    </MudChip>
+                                                    @if (CanEditMessage(message))
+                                                    {
+                                                        <MudIconButton Icon="@Icons.Material.Rounded.Edit"
+                                                                       Size="Size.Small"
+                                                                       Color="Color.Default"
+                                                                       OnClick="@(() => BeginEdit(message))" />
+                                                    }
+                                                    @if (CanDeleteMessage(message))
+                                                    {
+                                                        <MudIconButton Icon="@Icons.Material.Rounded.Delete"
+                                                                       Size="Size.Small"
+                                                                       Color="Color.Error"
+                                                                       OnClick="@(() => DeleteMessage(message))" />
+                                                    }
+                                                </MudStack>
+                                            </MudStack>
+                                            @if (_editingMessageId == message.Message.Id)
+                                            {
+                                                <MudStack Row="true" Spacing="2" AlignItems="AlignItems.End">
+                                                    <MudTextField @bind-Value="_editText"
+                                                                  Variant="Variant.Outlined"
+                                                                  FullWidth="true"
+                                                                  Immediate="true" />
+                                                    <MudButton Variant="Variant.Filled"
+                                                               Color="Color.Primary"
+                                                               OnClick="SaveEdit">
+                                                        Save
+                                                    </MudButton>
+                                                    <MudButton Variant="Variant.Text"
+                                                               OnClick="CancelEdit">
+                                                        Cancel
+                                                    </MudButton>
+                                                </MudStack>
+                                            }
+                                            else
+                                            {
+                                                <MudText Typo="Typo.body1">@GetMessageBody(message)</MudText>
+                                            }
+                                            <MudStack Row="true" Spacing="1">
+                                                <MudText Typo="Typo.caption">@message.Message.CreatedAt.ToLocalTime().ToString("u")</MudText>
+                                                @if (message.Message.EditedAt.HasValue)
+                                                {
+                                                    <MudText Typo="Typo.caption">(edited)</MudText>
+                                                }
+                                                @if (message.Message.DeletedAt.HasValue)
+                                                {
+                                                    <MudText Typo="Typo.caption">(deleted)</MudText>
+                                                }
+                                            </MudStack>
+                                        </MudStack>
+                                    </MudPaper>
+                                }
+                            }
+                        </MudStack>
+                    </MudPaper>
 
-                <MudStack Row="true" Spacing="2" AlignItems="AlignItems.End">
-                    <MudTextField @bind-Value="_messageText"
-                                  Label="Message"
-                                  Variant="Variant.Outlined"
-                                  FullWidth="true"
-                                  Immediate="true"
-                                  OnKeyDown="HandleKeyDown" />
-                    <MudButton Variant="Variant.Filled"
-                               Color="Color.Primary"
-                               OnClick="SendMessage"
-                               Disabled="@string.IsNullOrWhiteSpace(_messageText)">
-                        Send
-                    </MudButton>
-                </MudStack>
+                    <MudStack Row="true" Spacing="2" AlignItems="AlignItems.End">
+                        <MudTextField @bind-Value="_messageText"
+                                      Label="Message"
+                                      Variant="Variant.Outlined"
+                                      FullWidth="true"
+                                      Immediate="true"
+                                      OnKeyDown="HandleKeyDown" />
+                        <MudButton Variant="Variant.Filled"
+                                   Color="Color.Primary"
+                                   OnClick="SendMessage"
+                                   Disabled="@string.IsNullOrWhiteSpace(_messageText)">
+                            Send
+                        </MudButton>
+                    </MudStack>
+                }
             </MudStack>
         </MudItem>
     </MudGrid>

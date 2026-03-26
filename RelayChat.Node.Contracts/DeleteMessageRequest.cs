@@ -1,4 +1,4 @@
-namespace RelayChat.Node.Api;
+namespace RelayChat.Node.Contracts;
 
 public sealed record DeleteMessageRequest(
     Guid ChannelId,

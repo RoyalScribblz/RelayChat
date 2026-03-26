@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using RelayChat.Node.Contracts;
 
 namespace RelayChat.Node.Database;
 
@@ -12,19 +13,9 @@ public sealed class ServerMembershipRepository(NodeDbContext dbContext)
                 ct);
     }
 
-    public async Task<ServerMembership> GetOrCreate(Guid serverId, Guid userId, CancellationToken ct = default)
+    public async Task<ServerMembership> Add(Guid serverId, Guid userId, ServerMembershipRole role, CancellationToken ct = default)
     {
-        var membership = await Get(serverId, userId, ct);
-        if (membership is not null)
-        {
-            return membership;
-        }
-
-        var role = await dbContext.ServerMemberships.AnyAsync(existing => existing.ServerId == serverId, ct)
-            ? ServerMembershipRole.Member
-            : ServerMembershipRole.Admin;
-
-        membership = new ServerMembership
+        var membership = new ServerMembership
         {
             ServerId = serverId,
             UserId = userId,

@@ -4,6 +4,12 @@ namespace RelayChat.Node.Database;
 
 public sealed class ServerRepository(NodeDbContext dbContext)
 {
+    public async Task Add(Server server, CancellationToken ct = default)
+    {
+        await dbContext.Servers.AddAsync(server, ct);
+        await dbContext.SaveChangesAsync(ct);
+    }
+
     public Task<Server?> Get(Guid serverId, CancellationToken ct = default)
     {
         return dbContext.Servers

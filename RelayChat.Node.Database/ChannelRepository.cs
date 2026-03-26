@@ -4,6 +4,12 @@ namespace RelayChat.Node.Database;
 
 public sealed class ChannelRepository(NodeDbContext dbContext)
 {
+    public async Task Add(Channel channel, CancellationToken ct = default)
+    {
+        await dbContext.Channels.AddAsync(channel, ct);
+        await dbContext.SaveChangesAsync(ct);
+    }
+
     public Task<Channel?> Get(Guid channelId, CancellationToken ct = default)
     {
         return dbContext.Channels

@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
 using System.Net.Http.Json;
 using RelayChat.Client.Services;
+using RelayChat.Node.Contracts;
 using MudBlazor;
 
 namespace RelayChat.Client.Pages;
@@ -16,6 +17,7 @@ public partial class Chat : ComponentBase, IDisposable
     private Guid? editingMessageId;
     private string messageText = string.Empty;
     private string editText = string.Empty;
+    private string newChannelName = string.Empty;
     private HttpClient? httpClient;
 
     [Parameter]
@@ -30,8 +32,12 @@ public partial class Chat : ComponentBase, IDisposable
     [Inject]
     public required NodeApiOptions NodeApiOptions { get; init; }
 
+    [Inject]
+    public required NavigationManager NavigationManager { get; init; }
+
     protected Guid _channelId => ChannelId;
     protected IReadOnlyList<ServerDto> _servers => servers;
+    protected bool _hasMembership { get; private set; }
     protected ServerMembershipRole _membershipRole { get; private set; } = ServerMembershipRole.Member;
     protected string _serverName { get; private set; } = string.Empty;
     protected string _channelName { get; private set; } = string.Empty;
@@ -42,6 +48,11 @@ public partial class Chat : ComponentBase, IDisposable
     {
         get => editText;
         set => editText = value;
+    }
+    protected string _newChannelName
+    {
+        get => newChannelName;
+        set => newChannelName = value;
     }
     protected string _messageText
     {
@@ -70,6 +81,12 @@ public partial class Chat : ComponentBase, IDisposable
             editText = string.Empty;
         }
 
+        if (!_hasMembership)
+        {
+            joinedChannelId = null;
+            return;
+        }
+
         var history = await GetMessages(limit: HistoryPageSize);
         messages.Clear();
         foreach (var message in history)
@@ -83,6 +100,11 @@ public partial class Chat : ComponentBase, IDisposable
 
     protected async Task SendMessage()
     {
+        if (!_hasMembership)
+        {
+            return;
+        }
+
         var content = messageText.Trim();
         if (string.IsNullOrWhiteSpace(content))
         {
@@ -198,7 +220,7 @@ public partial class Chat : ComponentBase, IDisposable
 
     protected async Task SaveEdit()
     {
-        if (!editingMessageId.HasValue)
+        if (!editingMessageId.HasValue || !_hasMembership)
         {
             return;
         }
@@ -218,10 +240,44 @@ public partial class Chat : ComponentBase, IDisposable
 
     protected async Task DeleteMessage(ChatMessage message)
     {
+        if (!_hasMembership)
+        {
+            return;
+        }
+
         await ChatClient.DeleteMessage(new DeleteMessageRequest(
             ChannelId,
             message.Message.Id,
             ChatClient.UserId));
+    }
+
+    protected async Task CreateChannel()
+    {
+        ArgumentNullException.ThrowIfNull(httpClient);
+        if (_membershipRole != ServerMembershipRole.Admin)
+        {
+            return;
+        }
+
+        var channelName = newChannelName.Trim();
+        if (string.IsNullOrWhiteSpace(channelName))
+        {
+            return;
+        }
+
+        var response = await httpClient.PostAsJsonAsync(
+            $"/servers/{ServerId}/channels",
+            new CreateChannelRequest(channelName, ChatClient.UserId));
+
+        response.EnsureSuccessStatusCode();
+        var channel = await response.Content.ReadFromJsonAsync<ChannelDto>();
+        if (channel is null)
+        {
+            return;
+        }
+
+        newChannelName = string.Empty;
+        NavigationManager.NavigateTo($"/servers/{ServerId}/channels/{channel.Id}");
     }
 
     private ChatMessage ToChatMessage(MessageDto message, MessageState state)
@@ -364,14 +420,14 @@ public partial class Chat : ComponentBase, IDisposable
         var availableChannels = await httpClient.GetFromJsonAsync<List<ChannelDto>>($"/servers/{ServerId}/channels") ?? [];
         var channel = availableChannels.FirstOrDefault(current => current.Id == ChannelId)
             ?? throw new InvalidOperationException($"Channel '{ChannelId}' was not returned by the node API.");
-        var membership = await httpClient.GetFromJsonAsync<ServerMembershipDto>($"/servers/{ServerId}/memberships/{ChatClient.UserId}")
-            ?? throw new InvalidOperationException($"Membership for user '{ChatClient.UserId}' was not returned by the node API.");
-
         _serverName = server.Name;
         _channelName = channel.Name;
-        _membershipRole = membership.Role;
         channels.Clear();
         channels.AddRange(availableChannels);
+
+        var membership = await GetMembership();
+        _hasMembership = membership is not null;
+        _membershipRole = membership?.Role ?? ServerMembershipRole.Member;
     }
 
     protected string GetChannelHref(ChannelDto channel)
@@ -402,5 +458,19 @@ public partial class Chat : ComponentBase, IDisposable
         }
 
         return message.IsOwnMessage || _membershipRole == ServerMembershipRole.Admin;
+    }
+
+    private async Task<ServerMembershipDto?> GetMembership()
+    {
+        ArgumentNullException.ThrowIfNull(httpClient);
+
+        var response = await httpClient.GetAsync($"/servers/{ServerId}/memberships/{ChatClient.UserId}");
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<ServerMembershipDto>();
     }
 }

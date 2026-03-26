@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.SignalR;
+using RelayChat.Node.Contracts;
 using RelayChat.Node.Database;
 
 namespace RelayChat.Node.Api;
@@ -16,7 +17,12 @@ public sealed class ChatHub(
             return;
         }
 
-        await membershipRepository.GetOrCreate(channel.ServerId, request.AuthorId);
+        var membership = await membershipRepository.Get(channel.ServerId, request.AuthorId);
+        if (membership is null)
+        {
+            return;
+        }
+
         await Groups.AddToGroupAsync(Context.ConnectionId, request.ChannelId.ToString());
     }
 
@@ -28,8 +34,8 @@ public sealed class ChatHub(
             return;
         }
 
-        var membership = await membershipRepository.GetOrCreate(channel.ServerId, request.AuthorId);
-        if (membership.Role is not ServerMembershipRole.Admin and not ServerMembershipRole.Member)
+        var membership = await membershipRepository.Get(channel.ServerId, request.AuthorId);
+        if (membership is null || membership.Role is not ServerMembershipRole.Admin and not ServerMembershipRole.Member)
         {
             return;
         }
@@ -45,7 +51,7 @@ public sealed class ChatHub(
         };
 
         await messageRepository.Add(message);
-        await Clients.Group(request.ChannelId.ToString()).SendAsync("ReceiveMessage", MessageDto.FromMessage(message));
+        await Clients.Group(request.ChannelId.ToString()).SendAsync("ReceiveMessage", message.ToDto());
     }
 
     public async Task EditMessage(EditMessageRequest request)
@@ -56,9 +62,10 @@ public sealed class ChatHub(
             return;
         }
 
-        var membership = await membershipRepository.GetOrCreate(channel.ServerId, request.AuthorId);
+        var membership = await membershipRepository.Get(channel.ServerId, request.AuthorId);
         var message = await messageRepository.Get(request.ChannelId, request.MessageId);
         if (message is null ||
+            membership is null ||
             membership.Role is not ServerMembershipRole.Admin and not ServerMembershipRole.Member ||
             message.AuthorId != request.AuthorId ||
             message.DeletedAt.HasValue)
@@ -70,7 +77,7 @@ public sealed class ChatHub(
         message.EditedAt = DateTimeOffset.UtcNow;
 
         await messageRepository.SaveChanges();
-        await Clients.Group(request.ChannelId.ToString()).SendAsync("ReceiveMessageUpdated", MessageDto.FromMessage(message));
+        await Clients.Group(request.ChannelId.ToString()).SendAsync("ReceiveMessageUpdated", message.ToDto());
     }
 
     public async Task DeleteMessage(DeleteMessageRequest request)
@@ -81,9 +88,9 @@ public sealed class ChatHub(
             return;
         }
 
-        var membership = await membershipRepository.GetOrCreate(channel.ServerId, request.AuthorId);
+        var membership = await membershipRepository.Get(channel.ServerId, request.AuthorId);
         var message = await messageRepository.Get(request.ChannelId, request.MessageId);
-        if (message is null || message.DeletedAt.HasValue)
+        if (message is null || membership is null || message.DeletedAt.HasValue)
         {
             return;
         }
@@ -97,6 +104,6 @@ public sealed class ChatHub(
         message.DeletedAt = DateTimeOffset.UtcNow;
 
         await messageRepository.SaveChanges();
-        await Clients.Group(request.ChannelId.ToString()).SendAsync("ReceiveMessageUpdated", MessageDto.FromMessage(message));
+        await Clients.Group(request.ChannelId.ToString()).SendAsync("ReceiveMessageUpdated", message.ToDto());
     }
 }

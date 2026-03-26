@@ -1,6 +1,13 @@
 <Solution>
-  <Project Path="RelayChat.Client/RelayChat.Client.csproj" />
-  <Project Path="RelayChat.ControlPlane.Api/RelayChat.ControlPlane.Api.csproj" />
-  <Project Path="RelayChat.Node.Api/RelayChat.Node.Api.csproj" />
-  <Project Path="RelayChat.Node.Database/RelayChat.Node.Database.csproj" />
+  <Folder Name="/Client/">
+    <Project Path="RelayChat.Client/RelayChat.Client.csproj" />
+  </Folder>
+  <Folder Name="/ControlPlane/">
+    <Project Path="RelayChat.ControlPlane.Api/RelayChat.ControlPlane.Api.csproj" />
+  </Folder>
+  <Folder Name="/Node/">
+    <Project Path="RelayChat.Node.Api/RelayChat.Node.Api.csproj" />
+    <Project Path="RelayChat.Node.Contracts/RelayChat.Node.Contracts.csproj" />
+    <Project Path="RelayChat.Node.Database/RelayChat.Node.Database.csproj" />
+  </Folder>
 </Solution>

@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.SignalR.Client;
+using RelayChat.Node.Contracts;
 
 namespace RelayChat.Client.Services;
 

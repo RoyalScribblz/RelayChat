@@ -1,3 +1,3 @@
-namespace RelayChat.Node.Api;
+namespace RelayChat.Node.Contracts;
 
 public sealed record JoinChannelRequest(Guid ChannelId, Guid AuthorId);
