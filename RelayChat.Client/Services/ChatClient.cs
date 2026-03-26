@@ -8,6 +8,7 @@ public sealed class ChatClient : IAsyncDisposable
     private readonly AuthService authService;
     private readonly HubConnection connection;
     private Guid? joinedChannelId;
+    private Guid? joinedVoiceChannelId;
 
     public ChatClient(NodeApiOptions options, AuthService authService)
     {
@@ -17,7 +18,7 @@ public sealed class ChatClient : IAsyncDisposable
             {
                 hubOptions.AccessTokenProvider = async () =>
                 {
-                    if (!joinedChannelId.HasValue)
+                    if (!joinedChannelId.HasValue && !joinedVoiceChannelId.HasValue)
                     {
                         return null;
                     }
@@ -30,11 +31,17 @@ public sealed class ChatClient : IAsyncDisposable
 
         connection.On<MessageDto>("ReceiveMessage", message => MessageReceived?.Invoke(message));
         connection.On<MessageDto>("ReceiveMessageUpdated", message => MessageUpdated?.Invoke(message));
+        connection.On<VoiceChannelStateDto>("ReceiveVoiceChannelState", state => VoiceChannelStateReceived?.Invoke(state));
         connection.Reconnected += async _ =>
         {
             if (joinedChannelId.HasValue)
             {
                 await JoinChannel(joinedChannelId.Value);
+            }
+
+            if (joinedVoiceChannelId.HasValue)
+            {
+                await JoinVoiceChannel(joinedVoiceChannelId.Value);
             }
 
             if (Reconnected is not null)
@@ -46,6 +53,7 @@ public sealed class ChatClient : IAsyncDisposable
 
     public event Action<MessageDto>? MessageReceived;
     public event Action<MessageDto>? MessageUpdated;
+    public event Action<VoiceChannelStateDto>? VoiceChannelStateReceived;
     public event Func<Task>? Reconnected;
 
     public async Task Connect(CancellationToken ct = default)
@@ -61,6 +69,26 @@ public sealed class ChatClient : IAsyncDisposable
         joinedChannelId = channelId;
         await Connect(ct);
         await connection.InvokeAsync("JoinChannel", new JoinChannelRequest(channelId), ct);
+    }
+
+    public async Task JoinVoiceChannel(Guid channelId, CancellationToken ct = default)
+    {
+        joinedVoiceChannelId = channelId;
+        await Connect(ct);
+        await connection.InvokeAsync("JoinVoiceChannel", channelId, ct);
+    }
+
+    public async Task LeaveVoiceChannel(CancellationToken ct = default)
+    {
+        joinedVoiceChannelId = null;
+        await Connect(ct);
+        await connection.InvokeAsync("LeaveVoiceChannel", ct);
+    }
+
+    public async Task SetVoiceMuted(bool isMuted, CancellationToken ct = default)
+    {
+        await Connect(ct);
+        await connection.InvokeAsync("SetVoiceMuted", isMuted, ct);
     }
 
     public Task SendMessage(SendMessageRequest request, CancellationToken ct = default)

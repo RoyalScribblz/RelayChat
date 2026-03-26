@@ -22,5 +22,6 @@ builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<ControlPlaneApiClient>();
 builder.Services.AddScoped<NodeApiClient>();
 builder.Services.AddScoped<ChatClient>();
+builder.Services.AddScoped<VoiceClient>();
 
 await builder.Build().RunAsync();

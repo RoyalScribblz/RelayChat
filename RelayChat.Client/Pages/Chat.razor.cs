@@ -6,16 +6,20 @@ using RelayChat.Node.Contracts;
 
 namespace RelayChat.Client.Pages;
 
-public partial class Chat : ComponentBase, IDisposable
+public partial class Chat : ComponentBase, IAsyncDisposable
 {
     private const int HistoryPageSize = 100;
     private readonly List<ChatMessage> messages = [];
     private readonly List<ChannelDto> channels = [];
+    private readonly List<VoiceParticipantDto> voiceParticipants = [];
+    private HashSet<Guid> activeSpeakerIds = [];
     private Guid? joinedChannelId;
     private string messageText = string.Empty;
     private string editText = string.Empty;
     private string newChannelName = string.Empty;
     private Guid? editingMessageId;
+    private ChannelType newChannelType = ChannelType.Text;
+    private ChannelType channelType = ChannelType.Text;
 
     [Parameter]
     public Guid ChannelId { get; set; }
@@ -32,14 +36,27 @@ public partial class Chat : ComponentBase, IDisposable
     [Inject]
     public required NodeApiClient NodeApiClient { get; init; }
 
+    [Inject]
+    public required VoiceClient VoiceClient { get; init; }
+
     protected Guid _channelId => ChannelId;
     protected bool _isAuthenticated { get; private set; }
     protected MembershipRole? _membershipRole { get; private set; }
     protected string _nodeName { get; private set; } = "Relay";
     protected string _channelName { get; private set; } = string.Empty;
+    protected ChannelType _channelType => channelType;
+    protected bool _isVoiceChannel => channelType == ChannelType.Voice;
+    protected bool _isConnectedToVoiceChannel => VoiceClient.ActiveChannelId == ChannelId;
+    protected bool _isVoiceMuted => VoiceClient.IsMuted;
     protected IReadOnlyList<ChannelDto> _channels => channels;
     protected IReadOnlyList<ChatMessage> _messages => messages;
+    protected IReadOnlyList<VoiceParticipantDto> _voiceParticipants => voiceParticipants;
     protected Guid? _editingMessageId => editingMessageId;
+    protected ChannelType _newChannelType
+    {
+        get => newChannelType;
+        set => newChannelType = value;
+    }
     protected string _editText
     {
         get => editText;
@@ -61,24 +78,43 @@ public partial class Chat : ComponentBase, IDisposable
         await AuthService.Initialize();
         ChatClient.MessageReceived += OnMessageReceived;
         ChatClient.MessageUpdated += OnMessageUpdated;
+        ChatClient.VoiceChannelStateReceived += OnVoiceChannelStateReceived;
         ChatClient.Reconnected += OnReconnected;
+        VoiceClient.ActiveSpeakersChanged += OnActiveSpeakersChanged;
     }
 
     protected override async Task OnParametersSetAsync()
     {
         await LoadChannelContext();
+
+        if (!_isAuthenticated || _membershipRole is null)
+        {
+            await LeaveVoiceChannel();
+            joinedChannelId = null;
+            return;
+        }
+
+        if (_isVoiceChannel)
+        {
+            messages.Clear();
+            editingMessageId = null;
+            editText = string.Empty;
+            await LoadVoiceChannel();
+            joinedChannelId = null;
+            return;
+        }
+
+        if (VoiceClient.ActiveChannelId.HasValue)
+        {
+            await LeaveVoiceChannel();
+        }
+
         if (joinedChannelId != ChannelId)
         {
             messages.Clear();
             messageText = string.Empty;
             editingMessageId = null;
             editText = string.Empty;
-        }
-
-        if (!_isAuthenticated || _membershipRole is null)
-        {
-            joinedChannelId = null;
-            return;
         }
 
         messages.Clear();
@@ -113,7 +149,7 @@ public partial class Chat : ComponentBase, IDisposable
 
     protected async Task SendMessage()
     {
-        if (!_isAuthenticated || _membershipRole is null || !AuthService.UserId.HasValue)
+        if (_isVoiceChannel || !_isAuthenticated || _membershipRole is null || !AuthService.UserId.HasValue)
         {
             return;
         }
@@ -159,6 +195,19 @@ public partial class Chat : ComponentBase, IDisposable
         }
     }
 
+    protected async Task ToggleMute()
+    {
+        var newMutedState = !VoiceClient.IsMuted;
+        await VoiceClient.SetMuted(newMutedState);
+        await ChatClient.SetVoiceMuted(newMutedState);
+    }
+
+    protected async Task DisconnectVoice()
+    {
+        await LeaveVoiceChannel();
+        StateHasChanged();
+    }
+
     protected async Task HandleKeyDown(KeyboardEventArgs args)
     {
         if (args.Key == "Enter")
@@ -178,9 +227,32 @@ public partial class Chat : ComponentBase, IDisposable
         };
     }
 
+    protected string GetChannelIcon(ChannelDto channel)
+    {
+        return channel.Type == ChannelType.Voice
+            ? Icons.Material.Rounded.VolumeUp
+            : Icons.Material.Rounded.Tag;
+    }
+
+    protected string GetChannelLabel(ChannelDto channel)
+    {
+        return channel.Type == ChannelType.Voice ? channel.Name : $"#{channel.Name}";
+    }
+
     protected string GetMessageBody(ChatMessage message)
     {
         return message.Message.DeletedAt.HasValue ? "[deleted]" : message.Message.Content;
+    }
+
+    protected string GetParticipantInitial(VoiceParticipantDto participant)
+    {
+        var value = string.IsNullOrWhiteSpace(participant.Name) ? participant.Handle : participant.Name;
+        return string.IsNullOrWhiteSpace(value) ? "?" : value[..1].ToUpperInvariant();
+    }
+
+    protected bool IsParticipantSpeaking(VoiceParticipantDto participant)
+    {
+        return activeSpeakerIds.Contains(participant.UserId);
     }
 
     protected void BeginEdit(ChatMessage message)
@@ -197,7 +269,7 @@ public partial class Chat : ComponentBase, IDisposable
 
     protected async Task SaveEdit()
     {
-        if (!editingMessageId.HasValue || _membershipRole is null)
+        if (_isVoiceChannel || !editingMessageId.HasValue || _membershipRole is null)
         {
             return;
         }
@@ -216,7 +288,7 @@ public partial class Chat : ComponentBase, IDisposable
 
     protected async Task DeleteMessage(ChatMessage message)
     {
-        if (_membershipRole is null)
+        if (_isVoiceChannel || _membershipRole is null)
         {
             return;
         }
@@ -239,13 +311,14 @@ public partial class Chat : ComponentBase, IDisposable
             return;
         }
 
-        var channel = await NodeApiClient.CreateChannel(new CreateChannelRequest(channelName));
+        var channel = await NodeApiClient.CreateChannel(new CreateChannelRequest(channelName, newChannelType));
         if (channel is null)
         {
             return;
         }
 
         newChannelName = string.Empty;
+        newChannelType = ChannelType.Text;
         NavigationManager.NavigateTo($"/channels/{channel.Id}");
     }
 
@@ -256,12 +329,12 @@ public partial class Chat : ComponentBase, IDisposable
 
     protected bool CanEditMessage(ChatMessage message)
     {
-        return message.IsOwnMessage && !message.Message.DeletedAt.HasValue;
+        return !_isVoiceChannel && message.IsOwnMessage && !message.Message.DeletedAt.HasValue;
     }
 
     protected bool CanDeleteMessage(ChatMessage message)
     {
-        if (message.Message.DeletedAt.HasValue)
+        if (_isVoiceChannel || message.Message.DeletedAt.HasValue)
         {
             return false;
         }
@@ -269,16 +342,20 @@ public partial class Chat : ComponentBase, IDisposable
         return message.IsOwnMessage || _membershipRole == MembershipRole.Admin;
     }
 
-    public void Dispose()
+    public async ValueTask DisposeAsync()
     {
         ChatClient.MessageReceived -= OnMessageReceived;
         ChatClient.MessageUpdated -= OnMessageUpdated;
+        ChatClient.VoiceChannelStateReceived -= OnVoiceChannelStateReceived;
         ChatClient.Reconnected -= OnReconnected;
+        VoiceClient.ActiveSpeakersChanged -= OnActiveSpeakersChanged;
+
+        await LeaveVoiceChannel();
     }
 
     private void OnMessageReceived(MessageDto message)
     {
-        if (message.ChannelId != ChannelId)
+        if (_isVoiceChannel || message.ChannelId != ChannelId)
         {
             return;
         }
@@ -289,7 +366,7 @@ public partial class Chat : ComponentBase, IDisposable
 
     private void OnMessageUpdated(MessageDto message)
     {
-        if (message.ChannelId != ChannelId)
+        if (_isVoiceChannel || message.ChannelId != ChannelId)
         {
             return;
         }
@@ -300,6 +377,24 @@ public partial class Chat : ComponentBase, IDisposable
             CancelEdit();
         }
 
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private void OnVoiceChannelStateReceived(VoiceChannelStateDto state)
+    {
+        if (state.ChannelId != ChannelId)
+        {
+            return;
+        }
+
+        voiceParticipants.Clear();
+        voiceParticipants.AddRange(state.Participants);
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private void OnActiveSpeakersChanged(IReadOnlySet<Guid> speakerIds)
+    {
+        activeSpeakerIds = speakerIds.ToHashSet();
         _ = InvokeAsync(StateHasChanged);
     }
 
@@ -326,6 +421,16 @@ public partial class Chat : ComponentBase, IDisposable
 
     private async Task OnReconnected()
     {
+        if (_isVoiceChannel)
+        {
+            var state = await NodeApiClient.GetVoiceChannelState(ChannelId);
+            voiceParticipants.Clear();
+            voiceParticipants.AddRange(state?.Participants ?? []);
+            activeSpeakerIds.Clear();
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
         await RecoverMissingMessages();
         await InvokeAsync(StateHasChanged);
     }
@@ -424,10 +529,56 @@ public partial class Chat : ComponentBase, IDisposable
             ?? throw new InvalidOperationException($"Channel '{ChannelId}' was not returned by the node API.");
 
         _channelName = channel.Name;
+        channelType = channel.Type;
         channels.Clear();
         channels.AddRange(availableChannels);
 
         var membership = _isAuthenticated ? await NodeApiClient.GetMembership() : null;
         _membershipRole = membership?.Role;
+    }
+
+    private async Task LoadVoiceChannel()
+    {
+        if (VoiceClient.ActiveChannelId.HasValue && VoiceClient.ActiveChannelId.Value != ChannelId)
+        {
+            await LeaveVoiceChannel();
+        }
+
+        if (!_isConnectedToVoiceChannel)
+        {
+            var access = await NodeApiClient.GetVoiceChannelAccess(ChannelId)
+                ?? throw new InvalidOperationException("The node did not return a LiveKit voice access token.");
+
+            await ChatClient.JoinVoiceChannel(ChannelId);
+
+            try
+            {
+                await VoiceClient.Join(ChannelId, access);
+            }
+            catch
+            {
+                await ChatClient.LeaveVoiceChannel();
+                throw;
+            }
+        }
+
+        var state = await NodeApiClient.GetVoiceChannelState(ChannelId);
+        voiceParticipants.Clear();
+        voiceParticipants.AddRange(state?.Participants ?? []);
+    }
+
+    private async Task LeaveVoiceChannel()
+    {
+        if (!VoiceClient.ActiveChannelId.HasValue)
+        {
+            voiceParticipants.Clear();
+            activeSpeakerIds.Clear();
+            return;
+        }
+
+        await ChatClient.LeaveVoiceChannel();
+        await VoiceClient.Leave();
+        voiceParticipants.Clear();
+        activeSpeakerIds.Clear();
     }
 }

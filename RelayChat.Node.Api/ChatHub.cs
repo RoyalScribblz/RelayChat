@@ -9,7 +9,8 @@ namespace RelayChat.Node.Api;
 public sealed class ChatHub(
     ChannelRepository channelRepository,
     MessageRepository messageRepository,
-    MembershipRepository membershipRepository) : Hub
+    MembershipRepository membershipRepository,
+    VoicePresenceService voicePresenceService) : Hub
 {
     public async Task JoinChannel(JoinChannelRequest request)
     {
@@ -34,6 +35,51 @@ public sealed class ChatHub(
         await Groups.AddToGroupAsync(Context.ConnectionId, request.ChannelId.ToString());
     }
 
+    public async Task JoinVoiceChannel(Guid channelId)
+    {
+        var user = Context.User;
+        if (user is null || !user.HasNodeAccess())
+        {
+            return;
+        }
+
+        var channel = await channelRepository.Get(channelId);
+        if (channel is null || channel.Type != ChannelType.Voice)
+        {
+            return;
+        }
+
+        var membership = await membershipRepository.Get(user.GetRequiredUserId());
+        if (membership is null)
+        {
+            return;
+        }
+
+        await voicePresenceService.Join(channelId, user, Context.ConnectionId);
+    }
+
+    public async Task LeaveVoiceChannel()
+    {
+        var user = Context.User;
+        if (user is null)
+        {
+            return;
+        }
+
+        await voicePresenceService.Leave(user.GetRequiredUserId(), Context.ConnectionId);
+    }
+
+    public async Task SetVoiceMuted(bool isMuted)
+    {
+        var user = Context.User;
+        if (user is null || !user.HasNodeAccess())
+        {
+            return;
+        }
+
+        await voicePresenceService.SetMuted(user.GetRequiredUserId(), isMuted);
+    }
+
     public async Task SendMessage(SendMessageRequest request)
     {
         var user = Context.User;
@@ -43,7 +89,7 @@ public sealed class ChatHub(
         }
 
         var channel = await channelRepository.Get(request.ChannelId);
-        if (channel is null)
+        if (channel is null || channel.Type != ChannelType.Text)
         {
             return;
         }
@@ -78,7 +124,7 @@ public sealed class ChatHub(
         }
 
         var channel = await channelRepository.Get(request.ChannelId);
-        if (channel is null)
+        if (channel is null || channel.Type != ChannelType.Text)
         {
             return;
         }
@@ -111,7 +157,7 @@ public sealed class ChatHub(
         }
 
         var channel = await channelRepository.Get(request.ChannelId);
-        if (channel is null)
+        if (channel is null || channel.Type != ChannelType.Text)
         {
             return;
         }
@@ -134,5 +180,16 @@ public sealed class ChatHub(
 
         await messageRepository.SaveChanges();
         await Clients.Group(request.ChannelId.ToString()).SendAsync("ReceiveMessageUpdated", message.ToDto());
+    }
+
+    public override async Task OnDisconnectedAsync(Exception? exception)
+    {
+        var user = Context.User;
+        if (user is not null)
+        {
+            await voicePresenceService.Leave(user.GetRequiredUserId(), Context.ConnectionId);
+        }
+
+        await base.OnDisconnectedAsync(exception);
     }
 }

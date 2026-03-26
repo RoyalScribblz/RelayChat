@@ -66,9 +66,9 @@
                                     {
                                         <MudListItem T="string"
                                                      Href="@GetChannelHref(channel.Id)"
-                                                     Icon="@Icons.Material.Rounded.Tag"
+                                                     Icon="@(channel.Type == ChannelType.Voice ? Icons.Material.Rounded.VolumeUp : Icons.Material.Rounded.Tag)"
                                                      Class="mb-1">
-                                            <MudText>#@channel.Name</MudText>
+                                            <MudText>@(channel.Type == ChannelType.Voice ? channel.Name : $"#{channel.Name}")</MudText>
                                         </MudListItem>
                                     }
                                 </MudList>

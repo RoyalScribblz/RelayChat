@@ -1,5 +1,5 @@
-using System.Text;
 using System.Security.Claims;
+using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
@@ -13,6 +13,8 @@ var connectionString = builder.Configuration.GetConnectionString("NodeDatabase")
     ?? throw new InvalidOperationException("Connection string 'NodeDatabase' was not found.");
 var relayTokens = builder.Configuration.GetSection("RelayTokens").Get<NodeRelayTokensOptions>()
     ?? throw new InvalidOperationException("Missing Relay token configuration.");
+var liveKit = builder.Configuration.GetSection("LiveKit").Get<LiveKitOptions>()
+    ?? throw new InvalidOperationException("Missing LiveKit configuration.");
 
 builder.Services.AddOpenApi();
 builder.Services.AddCors(options =>
@@ -79,10 +81,14 @@ builder.Services.AddDbContext<NodeDbContext>(options => options.UseNpgsql(connec
     npgsql.MigrationsAssembly(typeof(NodeDbContext).Assembly.FullName);
 }));
 builder.Services.AddSignalR();
+builder.Services.AddSingleton(liveKit);
+builder.Services.AddSingleton<LiveKitTokenService>();
 builder.Services.AddScoped<ChannelRepository>();
 builder.Services.AddScoped<MessageRepository>();
 builder.Services.AddScoped<MembershipRepository>();
 builder.Services.AddScoped<NodeStateRepository>();
+builder.Services.AddScoped<VoiceSessionRepository>();
+builder.Services.AddScoped<VoicePresenceService>();
 
 var app = builder.Build();
 
@@ -90,6 +96,8 @@ using (var scope = app.Services.CreateScope())
 {
     var dbContext = scope.ServiceProvider.GetRequiredService<NodeDbContext>();
     await dbContext.Database.MigrateAsync();
+    var voiceSessionRepository = scope.ServiceProvider.GetRequiredService<VoiceSessionRepository>();
+    await voiceSessionRepository.Clear();
 }
 
 app.MapOpenApi();
@@ -139,7 +147,8 @@ app.MapPost("/channels", [Authorize] async (
     var channel = new Channel
     {
         Id = Guid.NewGuid(),
-        Name = channelName
+        Name = channelName,
+        Type = request.Type
     };
 
     await channelRepository.Add(channel, ct);
@@ -207,11 +216,80 @@ app.MapGet("/channels/{channelId:guid}/messages", [Authorize] async (
         return Results.NotFound();
     }
 
+    if (channel.Type != ChannelType.Text)
+    {
+        return Results.BadRequest();
+    }
+
     var messages = await repository.GetByChannel(channelId, before, after, limit, ct);
     return Results.Ok(messages
         .OrderBy(message => message.CreatedAt)
         .ThenBy(message => message.Id)
         .Select(message => message.ToDto()));
+});
+app.MapGet("/voice/channels/{channelId:guid}", [Authorize] async (
+    Guid channelId,
+    ClaimsPrincipal user,
+    ChannelRepository channelRepository,
+    MembershipRepository membershipRepository,
+    VoicePresenceService voicePresenceService,
+    CancellationToken ct) =>
+{
+    if (!user.HasNodeAccess())
+    {
+        return Results.Forbid();
+    }
+
+    var membership = await membershipRepository.Get(user.GetRequiredUserId(), ct);
+    if (membership is null)
+    {
+        return Results.Forbid();
+    }
+
+    var channel = await channelRepository.Get(channelId, ct);
+    if (channel is null)
+    {
+        return Results.NotFound();
+    }
+
+    if (channel.Type != ChannelType.Voice)
+    {
+        return Results.BadRequest();
+    }
+
+    return Results.Ok(new VoiceChannelStateDto(channelId, await voicePresenceService.GetParticipants(channelId, ct)));
+});
+app.MapPost("/voice/channels/{channelId:guid}/access", [Authorize] async (
+    Guid channelId,
+    ClaimsPrincipal user,
+    ChannelRepository channelRepository,
+    MembershipRepository membershipRepository,
+    LiveKitTokenService liveKitTokenService,
+    CancellationToken ct) =>
+{
+    if (!user.HasNodeAccess())
+    {
+        return Results.Forbid();
+    }
+
+    var membership = await membershipRepository.Get(user.GetRequiredUserId(), ct);
+    if (membership is null)
+    {
+        return Results.Forbid();
+    }
+
+    var channel = await channelRepository.Get(channelId, ct);
+    if (channel is null)
+    {
+        return Results.NotFound();
+    }
+
+    if (channel.Type != ChannelType.Voice)
+    {
+        return Results.BadRequest();
+    }
+
+    return Results.Ok(liveKitTokenService.IssueVoiceAccessToken(channel, user));
 });
 app.MapHub<ChatHub>("/chathub").RequireAuthorization();
 

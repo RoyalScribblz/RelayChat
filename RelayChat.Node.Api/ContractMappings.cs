@@ -7,7 +7,7 @@ public static class ContractMappings
 {
     public static ChannelDto ToDto(this Channel channel)
     {
-        return new ChannelDto(channel.Id, channel.Name);
+        return new ChannelDto(channel.Id, channel.Name, channel.Type);
     }
 
     public static MessageDto ToDto(this Message message)

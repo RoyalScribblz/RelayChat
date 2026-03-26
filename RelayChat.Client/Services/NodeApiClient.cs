@@ -46,6 +46,26 @@ public sealed class NodeApiClient(AuthService authService, NodeApiOptions option
         return await response.Content.ReadFromJsonAsync<MembershipDto>(ct);
     }
 
+    public async Task<VoiceChannelStateDto?> GetVoiceChannelState(Guid channelId, CancellationToken ct = default)
+    {
+        using var client = CreateClient();
+        client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", await authService.GetNodeToken());
+
+        return await client.GetFromJsonAsync<VoiceChannelStateDto>($"/voice/channels/{channelId}", ct);
+    }
+
+    public async Task<VoiceChannelAccessDto?> GetVoiceChannelAccess(Guid channelId, CancellationToken ct = default)
+    {
+        using var client = CreateClient();
+        client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", await authService.GetNodeToken());
+
+        using var response = await client.PostAsync($"/voice/channels/{channelId}/access", null, ct);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<VoiceChannelAccessDto>(ct);
+    }
+
     public async Task<List<MessageDto>> GetMessages(Guid channelId, Guid? before = null, Guid? after = null, int? limit = null, CancellationToken ct = default)
     {
         using var client = CreateClient();

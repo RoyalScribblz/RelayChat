@@ -21,7 +21,8 @@ public sealed class ChannelRepository(NodeDbContext dbContext)
     {
         return dbContext.Channels
             .AsNoTracking()
-            .OrderBy(channel => channel.Name)
+            .OrderBy(channel => channel.Type)
+            .ThenBy(channel => channel.Name)
             .ToListAsync(ct);
     }
 }
