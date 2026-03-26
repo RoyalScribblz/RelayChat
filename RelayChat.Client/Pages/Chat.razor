@@ -110,6 +110,12 @@
                                            Disabled="@(!_isConnectedToVoiceChannel)">
                                     @(_isVoiceMuted ? "Unmute" : "Mute")
                                 </MudButton>
+                                <MudButton Variant="Variant.Filled"
+                                           Color="@(_isCameraEnabled ? Color.Secondary : Color.Default)"
+                                           OnClick="ToggleCamera"
+                                           Disabled="@(!_isConnectedToVoiceChannel)">
+                                    @(_isCameraEnabled ? "Camera Off" : "Camera On")
+                                </MudButton>
                                 <MudButton Variant="Variant.Outlined"
                                            Color="Color.Error"
                                            OnClick="DisconnectVoice"
@@ -117,6 +123,14 @@
                                     Leave Voice
                                 </MudButton>
                             </MudStack>
+                        </MudStack>
+                    </MudPaper>
+
+                    <MudPaper Class="pa-4" Outlined="true">
+                        <MudStack Spacing="2">
+                            <MudText Typo="Typo.h6">Video</MudText>
+                            <div id="livekit-video-grid"
+                                 style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;"></div>
                         </MudStack>
                     </MudPaper>
                 }
@@ -244,6 +258,12 @@
                                     {
                                         <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Filled">
                                             Speaking
+                                        </MudChip>
+                                    }
+                                    @if (IsParticipantOnCamera(participant))
+                                    {
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined">
+                                            Camera
                                         </MudChip>
                                     }
                                     @if (participant.IsMuted)

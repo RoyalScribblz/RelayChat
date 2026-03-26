@@ -10,8 +10,10 @@ public sealed class VoiceClient(IJSRuntime jsRuntime) : IAsyncDisposable
 
     public Guid? ActiveChannelId { get; private set; }
     public bool IsMuted { get; private set; }
+    public bool IsCameraEnabled { get; private set; }
     public bool IsConnected => ActiveChannelId.HasValue;
     public event Action<IReadOnlySet<Guid>>? ActiveSpeakersChanged;
+    public event Action<IReadOnlySet<Guid>>? VideoParticipantsChanged;
 
     public async Task Join(Guid channelId, VoiceChannelAccessDto access)
     {
@@ -20,6 +22,7 @@ public sealed class VoiceClient(IJSRuntime jsRuntime) : IAsyncDisposable
         await module.InvokeVoidAsync("joinVoiceChannel", access.ServerUrl, access.Token, callbackReference);
         ActiveChannelId = channelId;
         IsMuted = false;
+        IsCameraEnabled = false;
     }
 
     public async Task Leave()
@@ -34,7 +37,9 @@ public sealed class VoiceClient(IJSRuntime jsRuntime) : IAsyncDisposable
         await module.InvokeVoidAsync("leaveVoiceChannel");
         ActiveChannelId = null;
         IsMuted = false;
+        IsCameraEnabled = false;
         ActiveSpeakersChanged?.Invoke(new HashSet<Guid>());
+        VideoParticipantsChanged?.Invoke(new HashSet<Guid>());
     }
 
     public async Task SetMuted(bool isMuted)
@@ -48,6 +53,17 @@ public sealed class VoiceClient(IJSRuntime jsRuntime) : IAsyncDisposable
         IsMuted = isMuted;
     }
 
+    public async Task SetCameraEnabled(bool isEnabled)
+    {
+        if (module is null)
+        {
+            return;
+        }
+
+        await module.InvokeVoidAsync("setCameraEnabled", isEnabled);
+        IsCameraEnabled = isEnabled;
+    }
+
     [JSInvokable]
     public Task HandleActiveSpeakersChanged(string[] identities)
     {
@@ -56,6 +72,17 @@ public sealed class VoiceClient(IJSRuntime jsRuntime) : IAsyncDisposable
             .Where(userId => userId != Guid.Empty)
             .ToHashSet();
         ActiveSpeakersChanged?.Invoke(activeSpeakers);
+        return Task.CompletedTask;
+    }
+
+    [JSInvokable]
+    public Task HandleVideoParticipantsChanged(string[] identities)
+    {
+        var videoParticipants = identities
+            .Select(identity => Guid.TryParse(identity, out var userId) ? userId : Guid.Empty)
+            .Where(userId => userId != Guid.Empty)
+            .ToHashSet();
+        VideoParticipantsChanged?.Invoke(videoParticipants);
         return Task.CompletedTask;
     }
 

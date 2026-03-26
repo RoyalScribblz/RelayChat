@@ -13,6 +13,7 @@ public partial class Chat : ComponentBase, IAsyncDisposable
     private readonly List<ChannelDto> channels = [];
     private readonly List<VoiceParticipantDto> voiceParticipants = [];
     private HashSet<Guid> activeSpeakerIds = [];
+    private HashSet<Guid> videoParticipantIds = [];
     private Guid? joinedChannelId;
     private string messageText = string.Empty;
     private string editText = string.Empty;
@@ -48,6 +49,7 @@ public partial class Chat : ComponentBase, IAsyncDisposable
     protected bool _isVoiceChannel => channelType == ChannelType.Voice;
     protected bool _isConnectedToVoiceChannel => VoiceClient.ActiveChannelId == ChannelId;
     protected bool _isVoiceMuted => VoiceClient.IsMuted;
+    protected bool _isCameraEnabled => VoiceClient.IsCameraEnabled;
     protected IReadOnlyList<ChannelDto> _channels => channels;
     protected IReadOnlyList<ChatMessage> _messages => messages;
     protected IReadOnlyList<VoiceParticipantDto> _voiceParticipants => voiceParticipants;
@@ -81,6 +83,7 @@ public partial class Chat : ComponentBase, IAsyncDisposable
         ChatClient.VoiceChannelStateReceived += OnVoiceChannelStateReceived;
         ChatClient.Reconnected += OnReconnected;
         VoiceClient.ActiveSpeakersChanged += OnActiveSpeakersChanged;
+        VoiceClient.VideoParticipantsChanged += OnVideoParticipantsChanged;
     }
 
     protected override async Task OnParametersSetAsync()
@@ -202,6 +205,13 @@ public partial class Chat : ComponentBase, IAsyncDisposable
         await ChatClient.SetVoiceMuted(newMutedState);
     }
 
+    protected async Task ToggleCamera()
+    {
+        var newCameraState = !VoiceClient.IsCameraEnabled;
+        await VoiceClient.SetCameraEnabled(newCameraState);
+        await InvokeAsync(StateHasChanged);
+    }
+
     protected async Task DisconnectVoice()
     {
         await LeaveVoiceChannel();
@@ -253,6 +263,11 @@ public partial class Chat : ComponentBase, IAsyncDisposable
     protected bool IsParticipantSpeaking(VoiceParticipantDto participant)
     {
         return activeSpeakerIds.Contains(participant.UserId);
+    }
+
+    protected bool IsParticipantOnCamera(VoiceParticipantDto participant)
+    {
+        return videoParticipantIds.Contains(participant.UserId);
     }
 
     protected void BeginEdit(ChatMessage message)
@@ -349,6 +364,7 @@ public partial class Chat : ComponentBase, IAsyncDisposable
         ChatClient.VoiceChannelStateReceived -= OnVoiceChannelStateReceived;
         ChatClient.Reconnected -= OnReconnected;
         VoiceClient.ActiveSpeakersChanged -= OnActiveSpeakersChanged;
+        VoiceClient.VideoParticipantsChanged -= OnVideoParticipantsChanged;
 
         await LeaveVoiceChannel();
     }
@@ -398,6 +414,12 @@ public partial class Chat : ComponentBase, IAsyncDisposable
         _ = InvokeAsync(StateHasChanged);
     }
 
+    private void OnVideoParticipantsChanged(IReadOnlySet<Guid> participantIds)
+    {
+        videoParticipantIds = participantIds.ToHashSet();
+        _ = InvokeAsync(StateHasChanged);
+    }
+
     private ChatMessage ToChatMessage(MessageDto message, MessageState state)
     {
         return new ChatMessage
@@ -427,6 +449,7 @@ public partial class Chat : ComponentBase, IAsyncDisposable
             voiceParticipants.Clear();
             voiceParticipants.AddRange(state?.Participants ?? []);
             activeSpeakerIds.Clear();
+            videoParticipantIds.Clear();
             await InvokeAsync(StateHasChanged);
             return;
         }
@@ -573,6 +596,7 @@ public partial class Chat : ComponentBase, IAsyncDisposable
         {
             voiceParticipants.Clear();
             activeSpeakerIds.Clear();
+            videoParticipantIds.Clear();
             return;
         }
 
@@ -580,5 +604,6 @@ public partial class Chat : ComponentBase, IAsyncDisposable
         await VoiceClient.Leave();
         voiceParticipants.Clear();
         activeSpeakerIds.Clear();
+        videoParticipantIds.Clear();
     }
 }
