@@ -3,101 +3,138 @@
 
 <PageTitle>Relay</PageTitle>
 
-<div class="relay-shell">
-    <aside class="relay-server-rail">
-        <button type="button" class="relay-rail-button relay-rail-button--primary" @onclick="NoOp">
-            <MudIcon Icon="@Icons.Material.Rounded.AlternateEmail" />
-            <span>DMs</span>
-        </button>
+<div class="relay-shell @(_isVoiceChannel ? "relay-shell--voice" : string.Empty)">
+    <div class="relay-left-panel">
+        <aside class="relay-server-rail">
+            <button type="button" class="relay-rail-button relay-rail-button--primary" @onclick="NoOp">
+                <MudIcon Icon="@Icons.Material.Rounded.AlternateEmail" />
+                <span>DMs</span>
+            </button>
 
-        <div class="relay-rail-divider"></div>
+            <div class="relay-rail-divider"></div>
 
-        @if (_hasServer)
-        {
-            <a href="@GetServerHref()" class="relay-server-pill relay-server-pill--active" draggable="true">
-                <span>@_serverInitial</span>
-            </a>
-        }
-
-        <button type="button" class="relay-server-pill relay-server-pill--action" @onclick="NoOp">
-            <MudIcon Icon="@Icons.Material.Rounded.Add" />
-        </button>
-
-        <button type="button" class="relay-server-pill relay-server-pill--action" @onclick="NoOp">
-            <MudIcon Icon="@Icons.Material.Rounded.TravelExplore" />
-        </button>
-    </aside>
-
-    <section class="relay-sidebar">
-        <div class="relay-sidebar__header">
-            <div>
-                <div class="relay-eyebrow">Server</div>
-                <h1>@(_hasServer ? _nodeName : "No Servers")</h1>
-            </div>
-            @if (_membershipRole is not null)
+            @if (_hasServer)
             {
-                <MudChip T="string" Variant="Variant.Outlined" Color="Color.Primary">@_membershipRole</MudChip>
+                <a href="@GetServerHref()" class="relay-server-pill relay-server-pill--active" draggable="true">
+                    <span>@_serverInitial</span>
+                </a>
             }
-        </div>
 
-        @if (!_isAuthenticated)
-        {
-            <div class="relay-empty-panel">
-                <p>Sign in to access your servers.</p>
-                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Login">Login</MudButton>
-            </div>
-        }
-        else if (!_hasServer)
-        {
-            <div class="relay-empty-panel">
-                <p>You are in no servers.</p>
-                <MudText Typo="Typo.body2">This client is currently connected to a single node called <strong>@_nodeName</strong>.</MudText>
-                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="JoinNode">Join Server</MudButton>
-            </div>
-        }
-        else
-        {
-            @if (_canCreateChannels)
-            {
-                <div class="relay-channel-create">
-                    <MudTextField @bind-Value="_newChannelName"
-                                  Label="New channel"
-                                  Variant="Variant.Outlined"
-                                  FullWidth="true" />
-                    <MudSelect T="ChannelType"
-                               @bind-Value="_newChannelType"
-                               Label="Type"
-                               Variant="Variant.Outlined">
-                        <MudSelectItem Value="@ChannelType.Text">Text</MudSelectItem>
-                        <MudSelectItem Value="@ChannelType.Voice">Voice</MudSelectItem>
-                    </MudSelect>
-                    <MudButton Variant="Variant.Filled"
-                               Color="Color.Primary"
-                               OnClick="CreateChannel"
-                               Disabled="@string.IsNullOrWhiteSpace(_newChannelName)">
-                        Add Channel
-                    </MudButton>
+            <button type="button" class="relay-server-pill relay-server-pill--action" @onclick="NoOp">
+                <MudIcon Icon="@Icons.Material.Rounded.Add" />
+            </button>
+
+            <button type="button" class="relay-server-pill relay-server-pill--action" @onclick="NoOp">
+                <MudIcon Icon="@Icons.Material.Rounded.TravelExplore" />
+            </button>
+        </aside>
+
+        <section class="relay-sidebar">
+            <div class="relay-sidebar__grow">
+                <div class="relay-sidebar__header">
+                    <div>
+                        <div class="relay-eyebrow">Server</div>
+                        <h1>@(_hasServer ? _nodeName : "No Servers")</h1>
+                    </div>
+                    @if (_membershipRole is not null)
+                    {
+                        <MudChip T="string" Variant="Variant.Outlined" Color="Color.Primary">@_membershipRole</MudChip>
+                    }
                 </div>
-            }
 
-            <div class="relay-channel-list">
-                @foreach (var channel in _channels)
+                @if (!_isAuthenticated)
                 {
-                    <a href="@GetChannelHref(channel)"
-                       class="relay-channel-item @(IsCurrentChannel(channel) ? "relay-channel-item--active" : string.Empty)"
-                       draggable="@_canReorderChannels"
-                       @ondragstart="@(() => BeginChannelDrag(channel.Id))"
-                       @ondragover:preventDefault
-                       @ondrop="@(() => DropChannel(channel.Id))">
-                        <div class="relay-channel-item__icon">
-                            <MudIcon Icon="@GetChannelIcon(channel)" />
+                    <div class="relay-empty-panel">
+                        <p>Sign in to access your servers.</p>
+                        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Login">Login</MudButton>
+                    </div>
+                }
+                else if (!_hasServer)
+                {
+                    <div class="relay-empty-panel">
+                        <p>You are in no servers.</p>
+                        <MudText Typo="Typo.body2">This client is currently connected to a single node called <strong>@_nodeName</strong>.</MudText>
+                        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="JoinNode">Join Server</MudButton>
+                    </div>
+                }
+                else
+                {
+                    @if (_canCreateChannels)
+                    {
+                        <div class="relay-channel-create">
+                            <MudTextField @bind-Value="_newChannelName"
+                                          Label="New channel"
+                                          Variant="Variant.Outlined"
+                                          FullWidth="true" />
+                            <MudSelect T="ChannelType"
+                                       @bind-Value="_newChannelType"
+                                       Label="Type"
+                                       Variant="Variant.Outlined">
+                                <MudSelectItem Value="@ChannelType.Text">Text</MudSelectItem>
+                                <MudSelectItem Value="@ChannelType.Voice">Voice</MudSelectItem>
+                            </MudSelect>
+                            <MudButton Variant="Variant.Filled"
+                                       Color="Color.Primary"
+                                       OnClick="CreateChannel"
+                                       Disabled="@string.IsNullOrWhiteSpace(_newChannelName)">
+                                Add Channel
+                            </MudButton>
                         </div>
-                        <span>@GetChannelLabel(channel)</span>
-                    </a>
+                    }
+
+                    <div class="relay-channel-list">
+                        @foreach (var channel in _channels)
+                        {
+                            <a href="@GetChannelHref(channel)"
+                               class="relay-channel-item @(IsCurrentChannel(channel) ? "relay-channel-item--active" : string.Empty)"
+                               draggable="@_canReorderChannels"
+                               @ondragstart="@(() => BeginChannelDrag(channel.Id))"
+                               @ondragover:preventDefault
+                               @ondrop="@(() => DropChannel(channel.Id))">
+                                <div class="relay-channel-item__icon">
+                                    <MudIcon Icon="@GetChannelIcon(channel)" />
+                                </div>
+                                <span>@GetChannelLabel(channel)</span>
+                            </a>
+                        }
+                    </div>
                 }
             </div>
-        }
-    </section>
+        </section>
+
+        <div class="relay-user-pane">
+            <button type="button" class="relay-user-pane__main" @onclick="OpenSettings">
+                <div class="relay-user-pane__avatar">
+                    @if (!string.IsNullOrWhiteSpace(_currentUserAvatarUrl))
+                    {
+                        <img src="@_currentUserAvatarUrl" alt="@_currentUserName" />
+                    }
+                    else
+                    {
+                        <span>@_currentUserInitial</span>
+                    }
+                </div>
+                <div class="relay-user-pane__body">
+                    <span class="relay-user-pane__name">@_currentUserName</span>
+                    <span class="relay-user-pane__handle">@($"@{_currentUserHandle}")</span>
+                </div>
+            </button>
+            <div class="relay-user-pane__actions">
+                <MudIconButton Icon="@(_isVoiceMuted ? Icons.Material.Rounded.MicOff : Icons.Material.Rounded.Mic)"
+                               Size="Size.Small"
+                               Color="@(_isVoiceMuted ? Color.Warning : Color.Default)"
+                               OnClick="TogglePreferredMute" />
+                <MudIconButton Icon="@(_isVoiceDeafened ? Icons.Material.Rounded.HeadsetOff : Icons.Material.Rounded.Headset)"
+                               Size="Size.Small"
+                               Color="@(_isVoiceDeafened ? Color.Warning : Color.Default)"
+                               OnClick="TogglePreferredDeafen" />
+                <MudIconButton Icon="@Icons.Material.Rounded.Settings"
+                               Size="Size.Small"
+                               Color="Color.Default"
+                               OnClick="OpenSettings" />
+            </div>
+        </div>
+    </div>
 
     <main class="relay-content">
         @if (!_isAuthenticated)
@@ -273,46 +310,90 @@
         }
     </main>
 
-    <aside class="relay-members">
-        <div class="relay-members__header">
-            <div class="relay-eyebrow">Members</div>
-            <h2>@(members.Count)</h2>
-        </div>
-
-        @if (!_hasServer)
-        {
-            <div class="relay-empty-panel">
-                <p>No server members to show.</p>
+    @if (_showMembersPanel)
+    {
+        <aside class="relay-members">
+            <div class="relay-members__header">
+                <div class="relay-eyebrow">Members</div>
+                <h2>@(members.Count)</h2>
             </div>
-        }
-        else
-        {
-            @foreach (var group in GetMemberGroups())
-            {
-                <section class="relay-member-group">
-                    <h3>@GetMemberGroupLabel(group.Key)</h3>
 
-                    @foreach (var member in group)
+            <div class="relay-members__list">
+                @if (!_hasServer)
+                {
+                    <div class="relay-empty-panel">
+                        <p>No server members to show.</p>
+                    </div>
+                }
+                else
+                {
+                    @foreach (var group in GetMemberGroups())
                     {
-                        <div class="relay-member-row">
-                            <div class="relay-member-row__avatar">
-                                @if (!string.IsNullOrWhiteSpace(member.AvatarUrl))
-                                {
-                                    <img src="@member.AvatarUrl" alt="@member.Name" />
-                                }
-                                else
-                                {
-                                    <span>@GetMemberInitial(member)</span>
-                                }
-                            </div>
-                            <div class="relay-member-row__body">
-                                <span class="relay-member-row__name">@member.Name</span>
-                                <span class="relay-member-row__handle">@($"@{member.Handle}")</span>
-                            </div>
-                        </div>
+                        <section class="relay-member-group">
+                            <h3>@GetMemberGroupLabel(group.Key)</h3>
+
+                            @foreach (var member in group)
+                            {
+                                <div class="relay-member-row">
+                                    <div class="relay-member-row__avatar">
+                                        @if (!string.IsNullOrWhiteSpace(member.AvatarUrl))
+                                        {
+                                            <img src="@member.AvatarUrl" alt="@member.Name" />
+                                        }
+                                        else
+                                        {
+                                            <span>@GetMemberInitial(member)</span>
+                                        }
+                                    </div>
+                                    <div class="relay-member-row__body">
+                                        <span class="relay-member-row__name">@member.Name</span>
+                                        <span class="relay-member-row__handle">@($"@{member.Handle}")</span>
+                                    </div>
+                                </div>
+                            }
+                        </section>
                     }
-                </section>
-            }
-        }
-    </aside>
+                }
+            </div>
+        </aside>
+    }
 </div>
+
+@if (_isSettingsOpen)
+{
+    <div class="relay-settings-backdrop" @onclick="CloseSettings">
+        <div class="relay-settings-modal" @onclick:stopPropagation>
+            <div class="relay-settings-modal__header">
+                <div>
+                    <div class="relay-eyebrow">Settings</div>
+                    <h2>Edit Profile</h2>
+                </div>
+            </div>
+
+            <div class="relay-settings-modal__body">
+                <MudTextField @bind-Value="_profileName"
+                              Label="Display name"
+                              Variant="Variant.Outlined"
+                              FullWidth="true" />
+                <MudTextField @bind-Value="_profileHandle"
+                              Label="Handle"
+                              Variant="Variant.Outlined"
+                              FullWidth="true" />
+                <MudTextField @bind-Value="_profileAvatarUrl"
+                              Label="Avatar URL"
+                              Variant="Variant.Outlined"
+                              FullWidth="true" />
+
+                @if (!string.IsNullOrWhiteSpace(_profileErrorMessage))
+                {
+                    <MudAlert Severity="Severity.Error">@_profileErrorMessage</MudAlert>
+                }
+            </div>
+
+            <div class="relay-settings-modal__actions">
+                <MudButton Variant="Variant.Text" OnClick="CloseSettings">Cancel</MudButton>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveSettings">Save</MudButton>
+            </div>
+        </div>
+    </div>
+}

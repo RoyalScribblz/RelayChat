@@ -7,6 +7,7 @@ const activeSpeakerIds = new Set();
 const renderedVideoElements = [];
 let screenShareTracks = [];
 let focusedTileKey = null;
+let isDeafened = false;
 
 function getAudioRoot() {
     let root = document.getElementById("livekit-audio-root");
@@ -82,7 +83,7 @@ function attachRemoteAudioTrack(track, publication, participant) {
 
     const element = track.attach();
     element.autoplay = true;
-    element.muted = false;
+    element.muted = isDeafened;
     element.playsInline = true;
     getAudioRoot().appendChild(element);
     attachedAudioElements.set(key, { element, track });
@@ -107,6 +108,12 @@ function detachAllRemoteAudioTracks() {
     }
 
     attachedAudioElements.clear();
+}
+
+function applyPlaybackMute() {
+    for (const { element } of attachedAudioElements.values()) {
+        element.muted = isDeafened;
+    }
 }
 
 function clearRenderedVideoElements() {
@@ -226,6 +233,99 @@ function buildVisualTiles() {
     return tiles;
 }
 
+function createTileElement(tile, isFocused, isSecondary) {
+    const participant = tile.participant;
+    const isSpeaking = activeSpeakerIds.has(tile.identity);
+
+    const wrapper = document.createElement("button");
+    wrapper.type = "button";
+    wrapper.style.position = "relative";
+    wrapper.style.display = "flex";
+    wrapper.style.alignItems = "stretch";
+    wrapper.style.justifyContent = "stretch";
+    wrapper.style.padding = "0";
+    wrapper.style.flex = isSecondary ? "0 0 220px" : "1 1 auto";
+    wrapper.style.border = isSpeaking ? "2px solid #5edc93" : "1px solid rgba(154, 164, 178, 0.16)";
+    wrapper.style.borderRadius = "22px";
+    wrapper.style.overflow = "hidden";
+    wrapper.style.background = "#0f151d";
+    wrapper.style.cursor = "pointer";
+    wrapper.style.minHeight = isFocused ? "440px" : isSecondary ? "150px" : "240px";
+    wrapper.style.boxShadow = isFocused
+        ? "0 22px 48px rgba(0, 0, 0, 0.35)"
+        : "0 12px 28px rgba(0, 0, 0, 0.18)";
+    wrapper.style.aspectRatio = isFocused ? "16 / 8" : isSecondary ? "16 / 9" : "16 / 10";
+    wrapper.onclick = () => {
+        focusedTileKey = focusedTileKey === tile.key ? null : tile.key;
+        renderVideoGrid();
+    };
+
+    const body = document.createElement("div");
+    body.style.position = "relative";
+    body.style.flex = "1";
+    body.style.display = "flex";
+    body.style.alignItems = "center";
+    body.style.justifyContent = "center";
+    body.style.background = tile.type === "screen"
+        ? "#06080b"
+        : "linear-gradient(160deg, #0f151d 0%, #16212c 100%)";
+
+    if (tile.videoPublication) {
+        const element = tile.videoPublication.track.attach();
+        element.autoplay = true;
+        element.playsInline = true;
+        element.muted = tile.videoPublication.isLocal;
+        element.style.width = "100%";
+        element.style.height = "100%";
+        element.style.objectFit = tile.type === "screen" ? "contain" : "cover";
+        body.appendChild(element);
+        renderedVideoElements.push({ element, track: tile.videoPublication.track });
+    }
+    else {
+        body.appendChild(createPlaceholderAvatar(participant));
+    }
+
+    const footer = document.createElement("div");
+    footer.style.position = "absolute";
+    footer.style.left = "14px";
+    footer.style.right = "14px";
+    footer.style.bottom = "14px";
+    footer.style.display = "flex";
+    footer.style.alignItems = "center";
+    footer.style.justifyContent = "space-between";
+    footer.style.gap = "8px";
+
+    const title = createBadge(tile.label, {
+        maxWidth: "70%",
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        whiteSpace: "nowrap"
+    });
+
+    const badges = document.createElement("div");
+    badges.style.display = "flex";
+    badges.style.gap = "8px";
+    badges.style.flexWrap = "wrap";
+
+    if (tile.type === "screen") {
+        badges.appendChild(createBadge("Screen", { background: "rgba(77, 132, 255, 0.78)" }));
+    }
+
+    if (participant.isMuted) {
+        badges.appendChild(createBadge("Muted", { background: "rgba(255, 170, 66, 0.82)" }));
+    }
+
+    if (isSpeaking) {
+        badges.appendChild(createBadge("Speaking", { background: "rgba(47, 189, 99, 0.84)" }));
+    }
+
+    footer.appendChild(title);
+    footer.appendChild(badges);
+    body.appendChild(footer);
+    wrapper.appendChild(body);
+    return wrapper;
+}
+
 function renderVideoGrid() {
     const root = getVideoRoot();
     if (!root) {
@@ -252,104 +352,41 @@ function renderVideoGrid() {
         focusedTileKey = null;
     }
 
-    root.style.display = "grid";
+    if (!focusedTileKey) {
+        root.style.display = "grid";
+        root.style.gap = "16px";
+        root.style.gridTemplateColumns = "repeat(auto-fit, minmax(240px, 1fr))";
+
+        for (const tile of tiles) {
+            root.appendChild(createTileElement(tile, false, false));
+        }
+
+        return;
+    }
+
+    const focusedTile = tiles.find(tile => tile.key === focusedTileKey);
+    const remainingTiles = tiles.filter(tile => tile.key !== focusedTileKey);
+
+    root.style.display = "flex";
+    root.style.flexDirection = "column";
     root.style.gap = "16px";
-    root.style.gridTemplateColumns = focusedTileKey
-        ? "repeat(auto-fit, minmax(180px, 1fr))"
-        : "repeat(auto-fit, minmax(240px, 1fr))";
 
-    for (const tile of tiles) {
-        const participant = tile.participant;
-        const isFocused = focusedTileKey === tile.key;
-        const isSecondary = focusedTileKey && !isFocused;
-        const isSpeaking = activeSpeakerIds.has(tile.identity);
+    if (focusedTile) {
+        root.appendChild(createTileElement(focusedTile, true, false));
+    }
 
-        const wrapper = document.createElement("button");
-        wrapper.type = "button";
-        wrapper.style.position = "relative";
-        wrapper.style.display = "flex";
-        wrapper.style.alignItems = "stretch";
-        wrapper.style.justifyContent = "stretch";
-        wrapper.style.padding = "0";
-        wrapper.style.border = isSpeaking ? "2px solid #5edc93" : "1px solid rgba(154, 164, 178, 0.16)";
-        wrapper.style.borderRadius = "22px";
-        wrapper.style.overflow = "hidden";
-        wrapper.style.background = "#0f151d";
-        wrapper.style.cursor = "pointer";
-        wrapper.style.minHeight = isSecondary ? "160px" : "240px";
-        wrapper.style.boxShadow = isFocused
-            ? "0 22px 48px rgba(0, 0, 0, 0.35)"
-            : "0 12px 28px rgba(0, 0, 0, 0.18)";
-        wrapper.style.gridColumn = isFocused ? "1 / -1" : "auto";
-        wrapper.style.aspectRatio = isFocused ? "16 / 8" : "16 / 10";
-        wrapper.onclick = () => {
-            focusedTileKey = focusedTileKey === tile.key ? null : tile.key;
-            renderVideoGrid();
-        };
+    if (remainingTiles.length > 0) {
+        const strip = document.createElement("div");
+        strip.style.display = "flex";
+        strip.style.gap = "16px";
+        strip.style.overflowX = "auto";
+        strip.style.paddingBottom = "6px";
 
-        const body = document.createElement("div");
-        body.style.position = "relative";
-        body.style.flex = "1";
-        body.style.display = "flex";
-        body.style.alignItems = "center";
-        body.style.justifyContent = "center";
-        body.style.background = tile.type === "screen"
-            ? "#06080b"
-            : "linear-gradient(160deg, #0f151d 0%, #16212c 100%)";
-
-        if (tile.videoPublication) {
-            const element = tile.videoPublication.track.attach();
-            element.autoplay = true;
-            element.playsInline = true;
-            element.muted = tile.videoPublication.isLocal;
-            element.style.width = "100%";
-            element.style.height = "100%";
-            element.style.objectFit = tile.type === "screen" ? "contain" : "cover";
-            body.appendChild(element);
-            renderedVideoElements.push({ element, track: tile.videoPublication.track });
-        } else {
-            body.appendChild(createPlaceholderAvatar(participant));
+        for (const tile of remainingTiles) {
+            strip.appendChild(createTileElement(tile, false, true));
         }
 
-        const footer = document.createElement("div");
-        footer.style.position = "absolute";
-        footer.style.left = "14px";
-        footer.style.right = "14px";
-        footer.style.bottom = "14px";
-        footer.style.display = "flex";
-        footer.style.alignItems = "center";
-        footer.style.justifyContent = "space-between";
-        footer.style.gap = "8px";
-
-        const title = createBadge(tile.label, {
-            maxWidth: "70%",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap"
-        });
-
-        const badges = document.createElement("div");
-        badges.style.display = "flex";
-        badges.style.gap = "8px";
-        badges.style.flexWrap = "wrap";
-
-        if (tile.type === "screen") {
-            badges.appendChild(createBadge("Screen", { background: "rgba(77, 132, 255, 0.78)" }));
-        }
-
-        if (participant.isMuted) {
-            badges.appendChild(createBadge("Muted", { background: "rgba(255, 170, 66, 0.82)" }));
-        }
-
-        if (isSpeaking) {
-            badges.appendChild(createBadge("Speaking", { background: "rgba(47, 189, 99, 0.84)" }));
-        }
-
-        footer.appendChild(title);
-        footer.appendChild(badges);
-        body.appendChild(footer);
-        wrapper.appendChild(body);
-        root.appendChild(wrapper);
+        root.appendChild(strip);
     }
 }
 
@@ -467,6 +504,7 @@ export async function leaveVoiceChannel() {
         clearVideoPublications();
         voiceParticipants.clear();
         activeSpeakerIds.clear();
+        isDeafened = false;
         renderVideoGrid();
         if (dotNetRef) {
             await dotNetRef.invokeMethodAsync("HandleActiveSpeakersChanged", []);
@@ -481,6 +519,7 @@ export async function leaveVoiceChannel() {
     clearVideoPublications();
     voiceParticipants.clear();
     activeSpeakerIds.clear();
+    isDeafened = false;
     room = null;
     renderVideoGrid();
     if (dotNetRef) {
@@ -504,6 +543,11 @@ export async function setVoiceMuted(isMuted) {
     }
 
     await room.localParticipant.setMicrophoneEnabled(!isMuted);
+}
+
+export function setVoiceDeafened(deafened) {
+    isDeafened = deafened;
+    applyPlaybackMute();
 }
 
 export async function setCameraEnabled(isEnabled) {

@@ -32,12 +32,6 @@ public sealed class ChatHub(
             return;
         }
 
-        await membershipRepository.SyncProfile(
-            user.GetRequiredUserId(),
-            user.GetDisplayName(),
-            user.GetHandle(),
-            user.GetAvatarUrl());
-
         await Groups.AddToGroupAsync(Context.ConnectionId, request.ChannelId.ToString());
     }
 
@@ -60,12 +54,6 @@ public sealed class ChatHub(
         {
             return;
         }
-
-        await membershipRepository.SyncProfile(
-            user.GetRequiredUserId(),
-            user.GetDisplayName(),
-            user.GetHandle(),
-            user.GetAvatarUrl());
 
         await voicePresenceService.Join(channelId, user, Context.ConnectionId);
     }
@@ -109,17 +97,6 @@ public sealed class ChatHub(
         var userId = user.GetRequiredUserId();
         var membership = await membershipRepository.Get(userId);
         if (membership is null || membership.Role is not MembershipRole.Admin and not MembershipRole.Member)
-        {
-            return;
-        }
-
-        await membershipRepository.SyncProfile(
-            userId,
-            user.GetDisplayName(),
-            user.GetHandle(),
-            user.GetAvatarUrl());
-        membership = await membershipRepository.Get(userId);
-        if (membership is null)
         {
             return;
         }
@@ -168,12 +145,6 @@ public sealed class ChatHub(
         message.EditedAt = DateTimeOffset.UtcNow;
 
         await messageRepository.SaveChanges();
-        await membershipRepository.SyncProfile(
-            userId,
-            user.GetDisplayName(),
-            user.GetHandle(),
-            user.GetAvatarUrl());
-        membership = await membershipRepository.Get(userId);
         await Clients.Group(request.ChannelId.ToString()).SendAsync("ReceiveMessageUpdated", message.ToDto(membership));
     }
 

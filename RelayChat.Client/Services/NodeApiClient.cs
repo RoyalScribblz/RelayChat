@@ -55,6 +55,17 @@ public sealed class NodeApiClient(AuthService authService, NodeApiOptions option
         return await client.GetFromJsonAsync<List<MembershipDto>>("/memberships", ct) ?? [];
     }
 
+    public async Task<MembershipDto?> SyncProfile(CancellationToken ct = default)
+    {
+        using var client = CreateClient();
+        client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", await authService.GetNodeToken());
+
+        using var response = await client.PostAsync("/profile/sync", null, ct);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<MembershipDto>(ct);
+    }
+
     public async Task<VoiceChannelStateDto?> GetVoiceChannelState(Guid channelId, CancellationToken ct = default)
     {
         using var client = CreateClient();

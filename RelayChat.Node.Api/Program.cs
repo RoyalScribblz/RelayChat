@@ -2,6 +2,7 @@ using System.Security.Claims;
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using RelayChat.Node.Api;
@@ -243,6 +244,42 @@ app.MapGet("/memberships", [Authorize] async (
         .ThenBy(current => current.Name)
         .ThenBy(current => current.Handle)
         .Select(current => current.ToDto()));
+});
+app.MapPost("/profile/sync", [Authorize] async (
+    ClaimsPrincipal user,
+    MembershipRepository membershipRepository,
+    VoicePresenceService voicePresenceService,
+    IHubContext<ChatHub> hubContext,
+    CancellationToken ct) =>
+{
+    if (!user.HasNodeAccess())
+    {
+        return Results.Forbid();
+    }
+
+    var userId = user.GetRequiredUserId();
+    var membership = await membershipRepository.Get(userId, ct);
+    if (membership is null)
+    {
+        return Results.Forbid();
+    }
+
+    await membershipRepository.SyncProfile(
+        userId,
+        user.GetDisplayName(),
+        user.GetHandle(),
+        user.GetAvatarUrl(),
+        ct);
+
+    membership = await membershipRepository.Get(userId, ct);
+    if (membership is null)
+    {
+        return Results.NotFound();
+    }
+
+    await voicePresenceService.RefreshProfile(user, ct);
+    await hubContext.Clients.All.SendAsync("ReceiveMemberUpdated", membership.ToDto(), ct);
+    return Results.Ok(membership.ToDto());
 });
 app.MapPost("/memberships", [Authorize] async (
     ClaimsPrincipal user,

@@ -71,6 +71,21 @@ public sealed class VoicePresenceService(
         await Broadcast(existing.ChannelId, ct);
     }
 
+    public async Task RefreshProfile(ClaimsPrincipal user, CancellationToken ct = default)
+    {
+        var channelId = await repository.SyncProfile(
+            user.GetRequiredUserId(),
+            user.GetDisplayName(),
+            user.GetHandle(),
+            user.GetAvatarUrl(),
+            ct);
+
+        if (channelId.HasValue)
+        {
+            await Broadcast(channelId.Value, ct);
+        }
+    }
+
     private async Task Broadcast(Guid channelId, CancellationToken ct)
     {
         var state = new VoiceChannelStateDto(channelId, await GetParticipantsInternal(channelId, ct));

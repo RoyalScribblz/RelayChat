@@ -31,6 +31,7 @@ public sealed class ChatClient : IAsyncDisposable
 
         connection.On<MessageDto>("ReceiveMessage", message => MessageReceived?.Invoke(message));
         connection.On<MessageDto>("ReceiveMessageUpdated", message => MessageUpdated?.Invoke(message));
+        connection.On<MembershipDto>("ReceiveMemberUpdated", membership => MemberUpdated?.Invoke(membership));
         connection.On<VoiceChannelStateDto>("ReceiveVoiceChannelState", state => VoiceChannelStateReceived?.Invoke(state));
         connection.Reconnected += async _ =>
         {
@@ -53,6 +54,7 @@ public sealed class ChatClient : IAsyncDisposable
 
     public event Action<MessageDto>? MessageReceived;
     public event Action<MessageDto>? MessageUpdated;
+    public event Action<MembershipDto>? MemberUpdated;
     public event Action<VoiceChannelStateDto>? VoiceChannelStateReceived;
     public event Func<Task>? Reconnected;
 

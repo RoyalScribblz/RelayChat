@@ -18,6 +18,10 @@ public partial class Chat : ComponentBase, IAsyncDisposable
     private string messageText = string.Empty;
     private string editText = string.Empty;
     private string newChannelName = string.Empty;
+    private string profileName = string.Empty;
+    private string profileHandle = string.Empty;
+    private string? profileAvatarUrl;
+    private string? profileErrorMessage;
     private Guid? joinedTextChannelId;
     private Guid? draggedChannelId;
     private Guid? nodeId;
@@ -27,6 +31,9 @@ public partial class Chat : ComponentBase, IAsyncDisposable
     private IJSObjectReference? chatModule;
     private DotNetObjectReference<Chat>? callbackReference;
     private bool composerRegistered;
+    private bool isSettingsOpen;
+    private bool preferredMuted;
+    private bool preferredDeafened;
     private bool shouldScrollMessages;
 
     [Parameter]
@@ -37,6 +44,9 @@ public partial class Chat : ComponentBase, IAsyncDisposable
 
     [Inject]
     public required ChatClient ChatClient { get; init; }
+
+    [Inject]
+    public required ControlPlaneApiClient ControlPlaneApiClient { get; init; }
 
     [Inject]
     public required IJSRuntime JsRuntime { get; init; }
@@ -61,13 +71,20 @@ public partial class Chat : ComponentBase, IAsyncDisposable
     protected bool _isVoiceChannel => currentChannelType == ChannelType.Voice;
     protected bool _isTextChannel => currentChannelType == ChannelType.Text;
     protected bool _isConnectedToVoiceChannel => VoiceClient.ActiveChannelId == ChannelId;
-    protected bool _isVoiceMuted => VoiceClient.IsMuted;
+    protected bool _isVoiceMuted => VoiceClient.IsConnected ? VoiceClient.IsMuted : preferredMuted;
+    protected bool _isVoiceDeafened => VoiceClient.IsConnected ? VoiceClient.IsDeafened : preferredDeafened;
     protected bool _isCameraEnabled => VoiceClient.IsCameraEnabled;
     protected bool _isScreenShareEnabled => VoiceClient.IsScreenShareEnabled;
+    protected bool _showMembersPanel => _hasServer && !_isVoiceChannel;
     protected bool _canCreateChannels => _membershipRole == MembershipRole.Admin;
     protected bool _canReorderChannels => _membershipRole == MembershipRole.Admin && channels.Count > 1;
     protected bool _hasChannels => channels.Count > 0;
+    protected bool _isSettingsOpen => isSettingsOpen;
     protected string _serverInitial => string.IsNullOrWhiteSpace(_nodeName) ? "R" : _nodeName[..1].ToUpperInvariant();
+    protected string _currentUserName => AuthService.Name ?? "Anonymous";
+    protected string _currentUserHandle => AuthService.Handle ?? "anonymous";
+    protected string? _currentUserAvatarUrl => AuthService.AvatarUrl;
+    protected string _currentUserInitial => string.IsNullOrWhiteSpace(_currentUserName) ? "A" : _currentUserName[..1].ToUpperInvariant();
     protected IReadOnlyList<ChannelDto> _channels => channels;
     protected IReadOnlyList<MembershipDto> _members => members;
     protected IReadOnlyList<VoiceParticipantDto> _voiceParticipants => voiceParticipants;
@@ -88,6 +105,22 @@ public partial class Chat : ComponentBase, IAsyncDisposable
         get => newChannelName;
         set => newChannelName = value;
     }
+    protected string _profileName
+    {
+        get => profileName;
+        set => profileName = value;
+    }
+    protected string _profileHandle
+    {
+        get => profileHandle;
+        set => profileHandle = value;
+    }
+    protected string? _profileAvatarUrl
+    {
+        get => profileAvatarUrl;
+        set => profileAvatarUrl = value;
+    }
+    protected string? _profileErrorMessage => profileErrorMessage;
     protected string _messageText
     {
         get => messageText;
@@ -97,8 +130,10 @@ public partial class Chat : ComponentBase, IAsyncDisposable
     protected override async Task OnInitializedAsync()
     {
         await AuthService.Initialize();
+        await LoadVoicePreferences();
         ChatClient.MessageReceived += OnMessageReceived;
         ChatClient.MessageUpdated += OnMessageUpdated;
+        ChatClient.MemberUpdated += OnMemberUpdated;
         ChatClient.VoiceChannelStateReceived += OnVoiceChannelStateReceived;
         ChatClient.Reconnected += OnReconnected;
     }
@@ -257,9 +292,29 @@ public partial class Chat : ComponentBase, IAsyncDisposable
 
     protected async Task ToggleMute()
     {
-        var newMutedState = !VoiceClient.IsMuted;
-        await VoiceClient.SetMuted(newMutedState);
-        await ChatClient.SetVoiceMuted(newMutedState);
+        await TogglePreferredMute();
+    }
+
+    protected async Task TogglePreferredMute()
+    {
+        if (_isVoiceDeafened)
+        {
+            await ApplyVoicePreferenceState(false, false);
+            return;
+        }
+
+        await ApplyVoicePreferenceState(!_isVoiceMuted, false);
+    }
+
+    protected async Task TogglePreferredDeafen()
+    {
+        if (_isVoiceDeafened)
+        {
+            await ApplyVoicePreferenceState(false, false);
+            return;
+        }
+
+        await ApplyVoicePreferenceState(true, true);
     }
 
     protected async Task ToggleCamera()
@@ -295,6 +350,54 @@ public partial class Chat : ComponentBase, IAsyncDisposable
         }
 
         NavigationManager.NavigateTo("/");
+    }
+
+    protected void OpenSettings()
+    {
+        profileName = AuthService.Name ?? string.Empty;
+        profileHandle = AuthService.Handle ?? string.Empty;
+        profileAvatarUrl = AuthService.AvatarUrl;
+        profileErrorMessage = null;
+        isSettingsOpen = true;
+    }
+
+    protected void CloseSettings()
+    {
+        isSettingsOpen = false;
+        profileErrorMessage = null;
+    }
+
+    protected async Task SaveSettings()
+    {
+        profileErrorMessage = null;
+
+        try
+        {
+            var profile = await ControlPlaneApiClient.UpdateCurrentUser(new UpdateProfileRequest(
+                profileName,
+                profileHandle,
+                profileAvatarUrl));
+
+            if (profile is null)
+            {
+                profileErrorMessage = "The control plane did not return the updated profile.";
+                return;
+            }
+
+            await AuthService.ApplyProfile(profile);
+            var membership = await NodeApiClient.SyncProfile();
+            if (membership is not null)
+            {
+                OnMemberUpdated(membership);
+            }
+
+            isSettingsOpen = false;
+            await LoadShellContext();
+        }
+        catch (Exception ex)
+        {
+            profileErrorMessage = ex.Message;
+        }
     }
 
     protected void NoOp()
@@ -508,6 +611,7 @@ public partial class Chat : ComponentBase, IAsyncDisposable
     {
         ChatClient.MessageReceived -= OnMessageReceived;
         ChatClient.MessageUpdated -= OnMessageUpdated;
+        ChatClient.MemberUpdated -= OnMemberUpdated;
         ChatClient.VoiceChannelStateReceived -= OnVoiceChannelStateReceived;
         ChatClient.Reconnected -= OnReconnected;
 
@@ -540,6 +644,14 @@ public partial class Chat : ComponentBase, IAsyncDisposable
         if (_membershipRole is not null)
         {
             members.AddRange(await NodeApiClient.GetMembers());
+            SortMembers();
+        }
+
+        if (_isAuthenticated && string.IsNullOrWhiteSpace(profileName))
+        {
+            profileName = AuthService.Name ?? string.Empty;
+            profileHandle = AuthService.Handle ?? string.Empty;
+            profileAvatarUrl = AuthService.AvatarUrl;
         }
     }
 
@@ -638,6 +750,7 @@ public partial class Chat : ComponentBase, IAsyncDisposable
             try
             {
                 await VoiceClient.Join(channelId, access);
+                await ApplyVoicePreferenceState(preferredMuted, preferredDeafened);
             }
             catch
             {
@@ -700,6 +813,38 @@ public partial class Chat : ComponentBase, IAsyncDisposable
         await chatModule.InvokeVoidAsync("focusComposer");
     }
 
+    private async Task LoadVoicePreferences()
+    {
+        var storedMuted = await JsRuntime.InvokeAsync<string?>("localStorage.getItem", "relaychat.voice.muted");
+        var storedDeafened = await JsRuntime.InvokeAsync<string?>("localStorage.getItem", "relaychat.voice.deafened");
+        preferredMuted = string.Equals(storedMuted, "true", StringComparison.OrdinalIgnoreCase);
+        preferredDeafened = string.Equals(storedDeafened, "true", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task PersistVoicePreferences()
+    {
+        await JsRuntime.InvokeVoidAsync("localStorage.setItem", "relaychat.voice.muted", preferredMuted.ToString().ToLowerInvariant());
+        await JsRuntime.InvokeVoidAsync("localStorage.setItem", "relaychat.voice.deafened", preferredDeafened.ToString().ToLowerInvariant());
+    }
+
+    private async Task ApplyVoicePreferenceState(bool muted, bool deafened)
+    {
+        preferredMuted = muted;
+        preferredDeafened = deafened;
+        await PersistVoicePreferences();
+
+        if (!VoiceClient.IsConnected)
+        {
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        await VoiceClient.SetDeafened(deafened);
+        await VoiceClient.SetMuted(muted || deafened);
+        await ChatClient.SetVoiceMuted(muted || deafened);
+        await InvokeAsync(StateHasChanged);
+    }
+
     private void OnMessageReceived(MessageDto message)
     {
         if (!_isTextChannel || !ChannelId.HasValue || message.ChannelId != ChannelId.Value)
@@ -740,6 +885,62 @@ public partial class Chat : ComponentBase, IAsyncDisposable
         _ = InvokeAsync(async () =>
         {
             await VoiceClient.SetVoiceParticipants(voiceParticipants);
+            StateHasChanged();
+        });
+    }
+
+    private void OnMemberUpdated(MembershipDto membership)
+    {
+        var existingMemberIndex = members.FindIndex(current => current.UserId == membership.UserId);
+        if (existingMemberIndex >= 0)
+        {
+            members[existingMemberIndex] = membership;
+        }
+        else
+        {
+            members.Add(membership);
+        }
+
+        SortMembers();
+
+        for (var index = 0; index < voiceParticipants.Count; index++)
+        {
+            if (voiceParticipants[index].UserId != membership.UserId)
+            {
+                continue;
+            }
+
+            voiceParticipants[index] = voiceParticipants[index] with
+            {
+                Name = membership.Name,
+                Handle = membership.Handle,
+                AvatarUrl = membership.AvatarUrl
+            };
+        }
+
+        for (var index = 0; index < messages.Count; index++)
+        {
+            var current = messages[index];
+            if (current.Message.AuthorId != membership.UserId)
+            {
+                continue;
+            }
+
+            current.Message = current.Message with
+            {
+                AuthorName = membership.Name,
+                AuthorHandle = membership.Handle,
+                AuthorAvatarUrl = membership.AvatarUrl
+            };
+        }
+
+        _ = InvokeAsync(async () =>
+        {
+            if (_isVoiceChannel)
+            {
+                await VoiceClient.SetVoiceParticipants(voiceParticipants);
+            }
+
             StateHasChanged();
         });
     }
@@ -907,6 +1108,26 @@ public partial class Chat : ComponentBase, IAsyncDisposable
                DateOnly.FromDateTime(previous.Message.CreatedAt.LocalDateTime) ==
                DateOnly.FromDateTime(current.Message.CreatedAt.LocalDateTime) &&
                current.Message.CreatedAt - previous.Message.CreatedAt <= TimeSpan.FromMinutes(1);
+    }
+
+    private void SortMembers()
+    {
+        members.Sort((left, right) =>
+        {
+            var roleComparison = left.Role.CompareTo(right.Role);
+            if (roleComparison != 0)
+            {
+                return roleComparison;
+            }
+
+            var nameComparison = string.Compare(left.Name, right.Name, StringComparison.OrdinalIgnoreCase);
+            if (nameComparison != 0)
+            {
+                return nameComparison;
+            }
+
+            return string.Compare(left.Handle, right.Handle, StringComparison.OrdinalIgnoreCase);
+        });
     }
 
     protected sealed class ChatDayGroup(DateOnly day)

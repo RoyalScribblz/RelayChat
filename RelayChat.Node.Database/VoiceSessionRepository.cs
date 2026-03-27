@@ -70,4 +70,20 @@ public sealed class VoiceSessionRepository(NodeDbContext dbContext)
         existing.UpdatedAt = DateTimeOffset.UtcNow;
         await dbContext.SaveChangesAsync(ct);
     }
+
+    public async Task<Guid?> SyncProfile(Guid userId, string name, string handle, string? avatarUrl, CancellationToken ct = default)
+    {
+        var existing = await dbContext.VoiceSessions.SingleOrDefaultAsync(session => session.UserId == userId, ct);
+        if (existing is null)
+        {
+            return null;
+        }
+
+        existing.Name = name;
+        existing.Handle = handle;
+        existing.AvatarUrl = avatarUrl;
+        existing.UpdatedAt = DateTimeOffset.UtcNow;
+        await dbContext.SaveChangesAsync(ct);
+        return existing.ChannelId;
+    }
 }

@@ -130,6 +130,7 @@ public sealed class AuthService(
             AvatarUrl = profile.AvatarUrl,
             Email = profile.Email
         };
+        nodeTokens.Clear();
         await Persist();
     }
 

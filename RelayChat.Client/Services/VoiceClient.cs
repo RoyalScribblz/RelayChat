@@ -12,6 +12,7 @@ public sealed class VoiceClient(IJSRuntime jsRuntime) : IAsyncDisposable
 
     public Guid? ActiveChannelId { get; private set; }
     public bool IsMuted { get; private set; }
+    public bool IsDeafened { get; private set; }
     public bool IsCameraEnabled { get; private set; }
     public bool IsScreenShareEnabled { get; private set; }
     public bool IsConnected => ActiveChannelId.HasValue;
@@ -25,6 +26,7 @@ public sealed class VoiceClient(IJSRuntime jsRuntime) : IAsyncDisposable
         await module.InvokeVoidAsync("joinVoiceChannel", access.ServerUrl, access.Token, callbackReference);
         ActiveChannelId = channelId;
         IsMuted = false;
+        IsDeafened = false;
         IsCameraEnabled = false;
         IsScreenShareEnabled = false;
     }
@@ -35,12 +37,14 @@ public sealed class VoiceClient(IJSRuntime jsRuntime) : IAsyncDisposable
         {
             ActiveChannelId = null;
             IsMuted = false;
+            IsDeafened = false;
             return;
         }
 
         await module.InvokeVoidAsync("leaveVoiceChannel");
         ActiveChannelId = null;
         IsMuted = false;
+        IsDeafened = false;
         IsCameraEnabled = false;
         IsScreenShareEnabled = false;
         ActiveSpeakersChanged?.Invoke(new HashSet<Guid>());
@@ -56,6 +60,17 @@ public sealed class VoiceClient(IJSRuntime jsRuntime) : IAsyncDisposable
 
         await module.InvokeVoidAsync("setVoiceMuted", isMuted);
         IsMuted = isMuted;
+    }
+
+    public async Task SetDeafened(bool isDeafened)
+    {
+        if (module is null)
+        {
+            return;
+        }
+
+        await module.InvokeVoidAsync("setVoiceDeafened", isDeafened);
+        IsDeafened = isDeafened;
     }
 
     public async Task SetCameraEnabled(bool isEnabled)
