@@ -93,6 +93,12 @@ public sealed class ChatClient : IAsyncDisposable
         await connection.InvokeAsync("SetVoiceMuted", isMuted, ct);
     }
 
+    public async Task SetVoiceDeafened(bool isDeafened, CancellationToken ct = default)
+    {
+        await Connect(ct);
+        await connection.InvokeAsync("SetVoiceDeafened", isDeafened, ct);
+    }
+
     public Task SendMessage(SendMessageRequest request, CancellationToken ct = default)
     {
         return connection.InvokeAsync("SendMessage", request, ct);

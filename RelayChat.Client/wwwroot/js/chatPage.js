@@ -2,7 +2,21 @@ let composer = null;
 let dotNetRef = null;
 let documentKeydownHandler = null;
 let composerKeydownHandler = null;
+let composerInputHandler = null;
 let registeredComposerId = null;
+
+function resizeComposer() {
+    if (!composer) {
+        return;
+    }
+
+    composer.style.height = "auto";
+
+    const maxHeight = Math.floor(window.innerHeight / 3);
+    const nextHeight = Math.min(composer.scrollHeight, maxHeight);
+    composer.style.height = `${nextHeight}px`;
+    composer.style.overflowY = composer.scrollHeight > maxHeight ? "auto" : "hidden";
+}
 
 function isEditableTarget(target) {
     if (!target) {
@@ -65,13 +79,21 @@ export function registerComposer(dotNetObjectReference, composerId) {
         }
     };
 
+    composerInputHandler = () => resizeComposer();
+
     document.addEventListener("keydown", documentKeydownHandler);
     composer.addEventListener("keydown", composerKeydownHandler);
+    composer.addEventListener("input", composerInputHandler);
+    resizeComposer();
 }
 
 export function unregisterComposer() {
     if (composer && composerKeydownHandler) {
         composer.removeEventListener("keydown", composerKeydownHandler);
+    }
+
+    if (composer && composerInputHandler) {
+        composer.removeEventListener("input", composerInputHandler);
     }
 
     if (documentKeydownHandler) {
@@ -82,6 +104,7 @@ export function unregisterComposer() {
     dotNetRef = null;
     documentKeydownHandler = null;
     composerKeydownHandler = null;
+    composerInputHandler = null;
     registeredComposerId = null;
 }
 
@@ -100,4 +123,12 @@ export function focusComposer() {
     }
 
     composer?.focus();
+}
+
+export function resetComposerSize() {
+    if (!composer && registeredComposerId) {
+        composer = document.getElementById(registeredComposerId);
+    }
+
+    resizeComposer();
 }

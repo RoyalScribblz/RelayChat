@@ -1,6 +1,6 @@
 .relay-shell {
     display: grid;
-    grid-template-columns: 396px minmax(0, 1fr) 280px;
+    grid-template-columns: 388px minmax(0, 1fr) 280px;
     height: 100vh;
     min-height: 0;
     overflow: hidden;
@@ -11,12 +11,12 @@
 }
 
 .relay-shell--voice {
-    grid-template-columns: 396px minmax(0, 1fr);
+    grid-template-columns: 388px minmax(0, 1fr);
 }
 
 .relay-left-panel {
     display: grid;
-    grid-template-columns: 88px 280px;
+    grid-template-columns: 72px 292px;
     grid-template-rows: minmax(0, 1fr) auto;
     height: 100vh;
     min-height: 0;
@@ -40,8 +40,8 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 12px;
-    padding: 18px 12px;
+    gap: 10px;
+    padding: 16px 8px;
     overflow-y: auto;
     background: rgba(5, 8, 12, 0.76);
     border-right: 1px solid rgba(160, 175, 196, 0.1);
@@ -50,11 +50,11 @@
 
 .relay-rail-button,
 .relay-server-pill {
-    width: 60px;
-    min-width: 60px;
-    height: 60px;
+    width: 48px;
+    min-width: 48px;
+    height: 48px;
     border: none;
-    border-radius: 20px;
+    border-radius: 16px;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -71,10 +71,14 @@
     line-height: 1;
 }
 
+.relay-rail-button :global(.mud-icon-root) {
+    font-size: 1.1rem;
+}
+
 .relay-rail-button:hover,
 .relay-server-pill:hover {
     transform: translateY(-2px);
-    border-radius: 16px;
+    border-radius: 14px;
     background: rgba(34, 52, 71, 0.96);
 }
 
@@ -84,7 +88,7 @@
 }
 
 .relay-server-pill {
-    font-size: 22px;
+    font-size: 18px;
     font-weight: 700;
 }
 
@@ -224,7 +228,7 @@
     padding: 18px;
     display: flex;
     flex-direction: column;
-    gap: 18px;
+    gap: 12px;
     overflow: hidden;
 }
 
@@ -232,7 +236,6 @@
 .relay-voice-stage {
     flex: 1;
     min-height: 0;
-    overflow: auto;
     display: flex;
     flex-direction: column;
     border-radius: 26px;
@@ -243,20 +246,51 @@
 
 .relay-voice-stage {
     justify-content: stretch;
+    overflow: hidden;
+}
+
+.relay-voice-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 0;
+}
+
+.relay-voice-header h2 {
+    margin: 0;
+    font-size: 22px;
+    line-height: 1.15;
+}
+
+.relay-voice-header :global(.mud-icon-root) {
+    color: #9cc7ff;
 }
 
 .relay-voice-grid {
     width: 100%;
+    height: 100%;
 }
 
 .relay-message-scroll {
     justify-content: flex-end;
+    overflow: auto;
 }
 
 .relay-voice-controls {
     display: flex;
-    gap: 12px;
+    gap: 8px;
+    align-items: center;
+    justify-content: center;
     flex-wrap: wrap;
+    min-height: 0;
+}
+
+.relay-voice-controls :global(.mud-icon-button-root) {
+    background: rgba(15, 22, 31, 0.96);
+    border: 1px solid rgba(160, 175, 196, 0.1);
+    width: 36px;
+    height: 36px;
+    padding: 6px;
 }
 
 .relay-empty-messages {
@@ -386,9 +420,15 @@
 }
 
 .relay-composer__input {
+    display: block;
     width: 100%;
-    min-height: 76px;
+    min-height: calc(1.5em + 2px);
+    max-height: 33vh;
+    height: calc(1.5em + 2px);
+    padding: 0;
+    margin: 0;
     resize: none;
+    overflow-y: hidden;
     border: none;
     outline: none;
     background: transparent;
@@ -556,17 +596,17 @@
 
 @media (max-width: 1400px) {
     .relay-shell {
-        grid-template-columns: 366px minmax(0, 1fr) 240px;
+        grid-template-columns: 358px minmax(0, 1fr) 240px;
     }
 
     .relay-left-panel {
-        grid-template-columns: 88px 250px;
+        grid-template-columns: 72px 262px;
     }
 }
 
 @media (max-width: 1100px) {
     .relay-shell {
-        grid-template-columns: 338px minmax(0, 1fr);
+        grid-template-columns: 358px minmax(0, 1fr);
     }
 
     .relay-members {

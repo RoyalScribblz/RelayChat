@@ -77,7 +77,30 @@ public sealed class ChatHub(
             return;
         }
 
+        var existing = await membershipRepository.Get(user.GetRequiredUserId());
+        if (existing is null)
+        {
+            return;
+        }
+
         await voicePresenceService.SetMuted(user.GetRequiredUserId(), isMuted);
+    }
+
+    public async Task SetVoiceDeafened(bool isDeafened)
+    {
+        var user = Context.User;
+        if (user is null || !user.HasNodeAccess())
+        {
+            return;
+        }
+
+        var existing = await membershipRepository.Get(user.GetRequiredUserId());
+        if (existing is null)
+        {
+            return;
+        }
+
+        await voicePresenceService.SetDeafened(user.GetRequiredUserId(), isDeafened);
     }
 
     public async Task SendMessage(SendMessageRequest request)

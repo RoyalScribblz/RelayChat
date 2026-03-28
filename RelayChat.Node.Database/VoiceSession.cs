@@ -9,6 +9,7 @@ public sealed class VoiceSession
     public string Handle { get; set; } = string.Empty;
     public string? AvatarUrl { get; set; }
     public bool IsMuted { get; set; }
+    public bool IsDeafened { get; set; }
     public DateTimeOffset JoinedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 }

@@ -29,6 +29,7 @@ public sealed class VoicePresenceService(
             Handle = user.GetHandle(),
             AvatarUrl = user.GetAvatarUrl(),
             IsMuted = false,
+            IsDeafened = false,
             JoinedAt = previous?.JoinedAt ?? DateTimeOffset.UtcNow,
             UpdatedAt = DateTimeOffset.UtcNow
         }, ct);
@@ -67,7 +68,19 @@ public sealed class VoicePresenceService(
             return;
         }
 
-        await repository.UpdateMute(userId, isMuted, ct);
+        await repository.UpdateMuted(userId, isMuted, ct);
+        await Broadcast(existing.ChannelId, ct);
+    }
+
+    public async Task SetDeafened(Guid userId, bool isDeafened, CancellationToken ct = default)
+    {
+        var existing = await repository.Get(userId, ct);
+        if (existing is null)
+        {
+            return;
+        }
+
+        await repository.UpdateDeafened(userId, isDeafened, ct);
         await Broadcast(existing.ChannelId, ct);
     }
 
@@ -102,7 +115,8 @@ public sealed class VoicePresenceService(
                 session.Name,
                 session.Handle,
                 session.AvatarUrl,
-                session.IsMuted))
+                session.IsMuted,
+                session.IsDeafened))
             .ToList();
     }
 }

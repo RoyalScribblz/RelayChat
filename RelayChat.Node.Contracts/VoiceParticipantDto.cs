@@ -6,4 +6,5 @@ public sealed record VoiceParticipantDto(
     string Name,
     string Handle,
     string? AvatarUrl,
-    bool IsMuted);
+    bool IsMuted,
+    bool IsDeafened);

@@ -126,7 +126,7 @@
                                OnClick="TogglePreferredMute" />
                 <MudIconButton Icon="@(_isVoiceDeafened ? Icons.Material.Rounded.HeadsetOff : Icons.Material.Rounded.Headset)"
                                Size="Size.Small"
-                               Color="@(_isVoiceDeafened ? Color.Warning : Color.Default)"
+                               Color="@(_isVoiceDeafened ? Color.Error : Color.Default)"
                                OnClick="TogglePreferredDeafen" />
                 <MudIconButton Icon="@Icons.Material.Rounded.Settings"
                                Size="Size.Small"
@@ -162,11 +162,9 @@
         }
         else if (_isVoiceChannel)
         {
-            <div class="relay-channel-header">
-                <div>
-                    <div class="relay-eyebrow">Voice Channel</div>
-                    <h2>@_currentChannelName</h2>
-                </div>
+            <div class="relay-voice-header">
+                <MudIcon Icon="@Icons.Material.Rounded.VolumeUp" Size="Size.Medium" />
+                <h2>@_currentChannelName</h2>
             </div>
 
             <div class="relay-voice-stage">
@@ -174,30 +172,31 @@
             </div>
 
             <div class="relay-voice-controls">
-                <MudButton Variant="Variant.Filled"
-                           Color="@(_isVoiceMuted ? Color.Warning : Color.Primary)"
-                           OnClick="ToggleMute"
-                           Disabled="@(!_isConnectedToVoiceChannel)">
-                    @(_isVoiceMuted ? "Unmute" : "Mute")
-                </MudButton>
-                <MudButton Variant="Variant.Filled"
-                           Color="@(_isCameraEnabled ? Color.Secondary : Color.Default)"
-                           OnClick="ToggleCamera"
-                           Disabled="@(!_isConnectedToVoiceChannel)">
-                    @(_isCameraEnabled ? "Camera Off" : "Camera On")
-                </MudButton>
-                <MudButton Variant="Variant.Filled"
-                           Color="@(_isScreenShareEnabled ? Color.Info : Color.Default)"
-                           OnClick="ToggleScreenShare"
-                           Disabled="@(!_isConnectedToVoiceChannel)">
-                    @(_isScreenShareEnabled ? "Stop Sharing" : "Share Screen")
-                </MudButton>
-                <MudButton Variant="Variant.Outlined"
-                           Color="Color.Error"
-                           OnClick="DisconnectVoice"
-                           Disabled="@(!_isConnectedToVoiceChannel)">
-                    Leave Call
-                </MudButton>
+                <MudIconButton Icon="@(_isVoiceMuted ? Icons.Material.Rounded.MicOff : Icons.Material.Rounded.Mic)"
+                               Size="Size.Medium"
+                               Color="@(_isVoiceMuted ? Color.Warning : Color.Default)"
+                               OnClick="ToggleMute"
+                               Disabled="@(!_isConnectedToVoiceChannel)" />
+                <MudIconButton Icon="@(_isVoiceDeafened ? Icons.Material.Rounded.HeadsetOff : Icons.Material.Rounded.Headset)"
+                               Size="Size.Medium"
+                               Color="@(_isVoiceDeafened ? Color.Error : Color.Default)"
+                               OnClick="TogglePreferredDeafen"
+                               Disabled="@(!_isConnectedToVoiceChannel)" />
+                <MudIconButton Icon="@(_isCameraEnabled ? Icons.Material.Rounded.Videocam : Icons.Material.Rounded.VideocamOff)"
+                               Size="Size.Medium"
+                               Color="@(_isCameraEnabled ? Color.Success : Color.Default)"
+                               OnClick="ToggleCamera"
+                               Disabled="@(!_isConnectedToVoiceChannel)" />
+                <MudIconButton Icon="@(_isScreenShareEnabled ? Icons.Material.Rounded.StopScreenShare : Icons.Material.Rounded.ScreenShare)"
+                               Size="Size.Medium"
+                               Color="@(_isScreenShareEnabled ? Color.Success : Color.Default)"
+                               OnClick="ToggleScreenShare"
+                               Disabled="@(!_isConnectedToVoiceChannel)" />
+                <MudIconButton Icon="@Icons.Material.Rounded.CallEnd"
+                               Size="Size.Medium"
+                               Color="Color.Error"
+                               OnClick="DisconnectVoice"
+                               Disabled="@(!_isConnectedToVoiceChannel)" />
             </div>
         }
         else

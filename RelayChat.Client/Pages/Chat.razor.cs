@@ -273,6 +273,11 @@ public partial class Chat : ComponentBase, IAsyncDisposable
         SortMessages();
         shouldScrollMessages = true;
         await InvokeAsync(StateHasChanged);
+        if (chatModule is not null)
+        {
+            await chatModule.InvokeVoidAsync("resetComposerSize");
+        }
+
         await FocusComposer();
 
         try
@@ -762,6 +767,7 @@ public partial class Chat : ComponentBase, IAsyncDisposable
         var state = await NodeApiClient.GetVoiceChannelState(channelId);
         voiceParticipants.Clear();
         voiceParticipants.AddRange(state?.Participants ?? []);
+        EnsureLocalVoiceParticipant();
         await VoiceClient.SetVoiceParticipants(voiceParticipants);
     }
 
@@ -842,6 +848,7 @@ public partial class Chat : ComponentBase, IAsyncDisposable
         await VoiceClient.SetDeafened(deafened);
         await VoiceClient.SetMuted(muted || deafened);
         await ChatClient.SetVoiceMuted(muted || deafened);
+        await ChatClient.SetVoiceDeafened(deafened);
         await InvokeAsync(StateHasChanged);
     }
 
@@ -882,6 +889,7 @@ public partial class Chat : ComponentBase, IAsyncDisposable
 
         voiceParticipants.Clear();
         voiceParticipants.AddRange(state.Participants);
+        EnsureLocalVoiceParticipant();
         _ = InvokeAsync(async () =>
         {
             await VoiceClient.SetVoiceParticipants(voiceParticipants);
@@ -1128,6 +1136,28 @@ public partial class Chat : ComponentBase, IAsyncDisposable
 
             return string.Compare(left.Handle, right.Handle, StringComparison.OrdinalIgnoreCase);
         });
+    }
+
+    private void EnsureLocalVoiceParticipant()
+    {
+        if (!VoiceClient.IsConnected || !ChannelId.HasValue || !AuthService.UserId.HasValue)
+        {
+            return;
+        }
+
+        if (voiceParticipants.Any(current => current.UserId == AuthService.UserId.Value))
+        {
+            return;
+        }
+
+        voiceParticipants.Add(new VoiceParticipantDto(
+            AuthService.UserId.Value,
+            ChannelId.Value,
+            AuthService.Name ?? AuthService.Handle ?? "You",
+            AuthService.Handle ?? "you",
+            AuthService.AvatarUrl,
+            VoiceClient.IsMuted,
+            VoiceClient.IsDeafened));
     }
 
     protected sealed class ChatDayGroup(DateOnly day)

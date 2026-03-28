@@ -7,7 +7,21 @@ const activeSpeakerIds = new Set();
 const renderedVideoElements = [];
 let screenShareTracks = [];
 let focusedTileKey = null;
+let secondaryTilesCollapsed = false;
 let isDeafened = false;
+
+function describeRoomState() {
+    return {
+        hasRoom: !!room,
+        roomName: room?.name ?? null,
+        connectionState: room?.state ?? null,
+        localIdentity: room?.localParticipant?.identity ?? null,
+        remoteParticipantCount: room?.remoteParticipants?.size ?? 0,
+        voiceParticipantCount: voiceParticipants.size,
+        videoPublicationCount: videoPublications.size,
+        focusedTileKey
+    };
+}
 
 function getAudioRoot() {
     let root = document.getElementById("livekit-audio-root");
@@ -62,13 +76,18 @@ function getParticipantMeta(identity) {
         name: identity,
         handle: identity,
         avatarUrl: null,
-        isMuted: false
+        isMuted: false,
+        isDeafened: false
     };
 }
 
 function getParticipantInitial(participant) {
     const value = participant?.name || participant?.handle || "?";
     return value.substring(0, 1).toUpperCase();
+}
+
+function isLocalIdentity(identity) {
+    return !!identity && identity === room?.localParticipant?.identity;
 }
 
 function attachRemoteAudioTrack(track, publication, participant) {
@@ -154,6 +173,40 @@ function createBadge(text, styles = {}) {
         badge.style[key] = value;
     }
 
+    return badge;
+}
+
+function createSvgIcon(pathData, size = 14) {
+    const ns = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(ns, "svg");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("width", String(size));
+    svg.setAttribute("height", String(size));
+    svg.style.display = "block";
+    svg.style.flex = "0 0 auto";
+
+    const path = document.createElementNS(ns, "path");
+    path.setAttribute("d", pathData);
+    path.setAttribute("fill", "currentColor");
+    svg.appendChild(path);
+    return svg;
+}
+
+function createIconBadge(icon, styles = {}) {
+    const badge = document.createElement("div");
+    badge.style.width = "30px";
+    badge.style.height = "30px";
+    badge.style.borderRadius = "999px";
+    badge.style.display = "inline-flex";
+    badge.style.alignItems = "center";
+    badge.style.justifyContent = "center";
+    badge.style.background = "rgba(7, 11, 16, 0.72)";
+    badge.style.color = "#f5f7fa";
+    for (const [key, value] of Object.entries(styles)) {
+        badge.style[key] = value;
+    }
+
+    badge.appendChild(icon);
     return badge;
 }
 
@@ -244,19 +297,20 @@ function createTileElement(tile, isFocused, isSecondary) {
     wrapper.style.alignItems = "stretch";
     wrapper.style.justifyContent = "stretch";
     wrapper.style.padding = "0";
-    wrapper.style.flex = isSecondary ? "0 0 220px" : "1 1 auto";
+    wrapper.style.flex = isSecondary ? "0 0 200px" : "1 1 auto";
     wrapper.style.border = isSpeaking ? "2px solid #5edc93" : "1px solid rgba(154, 164, 178, 0.16)";
     wrapper.style.borderRadius = "22px";
     wrapper.style.overflow = "hidden";
     wrapper.style.background = "#0f151d";
     wrapper.style.cursor = "pointer";
-    wrapper.style.minHeight = isFocused ? "440px" : isSecondary ? "150px" : "240px";
+    wrapper.style.minHeight = isFocused ? "420px" : isSecondary ? "126px" : "240px";
     wrapper.style.boxShadow = isFocused
         ? "0 22px 48px rgba(0, 0, 0, 0.35)"
         : "0 12px 28px rgba(0, 0, 0, 0.18)";
-    wrapper.style.aspectRatio = isFocused ? "16 / 8" : isSecondary ? "16 / 9" : "16 / 10";
+    wrapper.style.aspectRatio = isFocused ? "16 / 8.5" : isSecondary ? "16 / 9" : "16 / 10";
     wrapper.onclick = () => {
         focusedTileKey = focusedTileKey === tile.key ? null : tile.key;
+        secondaryTilesCollapsed = false;
         renderVideoGrid();
     };
 
@@ -287,9 +341,9 @@ function createTileElement(tile, isFocused, isSecondary) {
 
     const footer = document.createElement("div");
     footer.style.position = "absolute";
-    footer.style.left = "14px";
-    footer.style.right = "14px";
-    footer.style.bottom = "14px";
+    footer.style.left = "10px";
+    footer.style.right = "10px";
+    footer.style.bottom = "10px";
     footer.style.display = "flex";
     footer.style.alignItems = "center";
     footer.style.justifyContent = "space-between";
@@ -308,11 +362,24 @@ function createTileElement(tile, isFocused, isSecondary) {
     badges.style.flexWrap = "wrap";
 
     if (tile.type === "screen") {
-        badges.appendChild(createBadge("Screen", { background: "rgba(77, 132, 255, 0.78)" }));
+        badges.appendChild(createIconBadge(
+            createSvgIcon("M3 5h18c1.1 0 2 .9 2 2v10c0 1.1-.9 2-2 2h-7l2 2v1H8v-1l2-2H3c-1.1 0-2-.9-2-2V7c0-1.1.9-2 2-2Zm0 2v10h18V7H3Z", 18),
+            { background: "rgba(47, 189, 99, 0.84)" }
+        ));
     }
 
-    if (participant.isMuted) {
-        badges.appendChild(createBadge("Muted", { background: "rgba(255, 170, 66, 0.82)" }));
+    if (tile.type !== "screen" && participant.isMuted) {
+        badges.appendChild(createIconBadge(
+            createSvgIcon("M12 14.56V17c0 1.1-.9 2-2 2s-2-.9-2-2v-1.44l4 4ZM14 9.73V7c0-2.21-1.79-4-4-4-.88 0-1.7.29-2.36.77L14 9.73ZM4.27 3 3 4.27l5 5V13c0 .55.45 1 1 1h2l4 4v-3.73l4.73 4.73L21 17.73 4.27 3Z", 18),
+            { background: "rgba(255, 170, 66, 0.82)" }
+        ));
+    }
+
+    if (tile.type !== "screen" && participant.isDeafened) {
+        badges.appendChild(createIconBadge(
+            createSvgIcon("M19 11h-1.7c0 .74-.16 1.43-.43 2.05l1.23 1.23A6.955 6.955 0 0 0 19 11Zm-4 .17-3-3V5c0-1.66-1.34-3-3-3S6 3.34 6 5v.18l9 9ZM5.27 3 4 4.27 7.73 8H7c-1.1 0-2 .9-2 2v3c0 .55.45 1 1 1h2l4 4v-3.73L18.73 21 20 19.73 5.27 3Z", 18),
+            { background: "rgba(230, 72, 72, 0.84)" }
+        ));
     }
 
     if (isSpeaking) {
@@ -324,6 +391,69 @@ function createTileElement(tile, isFocused, isSecondary) {
     body.appendChild(footer);
     wrapper.appendChild(body);
     return wrapper;
+}
+
+function createToggleGlyph(direction) {
+    const glyph = document.createElement("span");
+    glyph.textContent = direction === "down" ? "▾" : "▴";
+    glyph.style.fontSize = "14px";
+    glyph.style.lineHeight = "1";
+    return glyph;
+}
+
+function createPeopleGlyph() {
+    const ns = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(ns, "svg");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("width", "14");
+    svg.setAttribute("height", "14");
+    svg.style.display = "block";
+
+    const path = document.createElementNS(ns, "path");
+    path.setAttribute(
+        "d",
+        "M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5s-3 1.34-3 3 1.34 3 3 3Zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5 5 6.34 5 8s1.34 3 3 3Zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5C15 14.17 10.33 13 8 13Zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.98 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5Z"
+    );
+    path.setAttribute("fill", "currentColor");
+    svg.appendChild(path);
+    return svg;
+}
+
+function createSecondaryToggleButton(collapsed, onClick) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.style.display = "inline-flex";
+    button.style.alignItems = "center";
+    button.style.justifyContent = "center";
+    button.style.gap = "6px";
+    button.style.height = "34px";
+    button.style.padding = "0 12px";
+    button.style.borderRadius = "999px";
+    button.style.border = "1px solid rgba(160, 175, 196, 0.14)";
+    button.style.background = "rgba(11, 17, 24, 0.88)";
+    button.style.boxShadow = "0 10px 24px rgba(0, 0, 0, 0.28)";
+    button.style.color = "#eef3f8";
+    button.style.cursor = "pointer";
+    button.style.backdropFilter = "blur(10px)";
+    button.style.opacity = "0";
+    button.style.transition = "opacity 120ms ease";
+    button.appendChild(createToggleGlyph(collapsed ? "up" : "down"));
+    button.appendChild(createPeopleGlyph());
+    button.onclick = event => {
+        event.stopPropagation();
+        onClick();
+    };
+    return button;
+}
+
+function attachHoverReveal(host, button) {
+    host.addEventListener("mouseenter", () => {
+        button.style.opacity = "1";
+    });
+
+    host.addEventListener("mouseleave", () => {
+        button.style.opacity = "0";
+    });
 }
 
 function renderVideoGrid() {
@@ -350,12 +480,15 @@ function renderVideoGrid() {
 
     if (focusedTileKey && !tiles.some(tile => tile.key === focusedTileKey)) {
         focusedTileKey = null;
+        secondaryTilesCollapsed = false;
     }
 
     if (!focusedTileKey) {
         root.style.display = "grid";
-        root.style.gap = "16px";
+        root.style.gap = "12px";
         root.style.gridTemplateColumns = "repeat(auto-fit, minmax(240px, 1fr))";
+        root.style.alignContent = "center";
+        root.style.justifyItems = "stretch";
 
         for (const tile of tiles) {
             root.appendChild(createTileElement(tile, false, false));
@@ -369,23 +502,57 @@ function renderVideoGrid() {
 
     root.style.display = "flex";
     root.style.flexDirection = "column";
-    root.style.gap = "16px";
+    root.style.gap = "12px";
 
     if (focusedTile) {
-        root.appendChild(createTileElement(focusedTile, true, false));
+        const focusedElement = createTileElement(focusedTile, true, false);
+        focusedElement.style.width = "100%";
+        focusedElement.style.maxWidth = "100%";
+
+        if (secondaryTilesCollapsed && remainingTiles.length > 0) {
+            const expandButton = createSecondaryToggleButton(true, () => {
+                secondaryTilesCollapsed = false;
+                renderVideoGrid();
+            });
+            expandButton.style.position = "absolute";
+            expandButton.style.left = "50%";
+            expandButton.style.bottom = "14px";
+            expandButton.style.transform = "translateX(-50%)";
+            attachHoverReveal(focusedElement, expandButton);
+            focusedElement.appendChild(expandButton);
+        }
+
+        root.appendChild(focusedElement);
     }
 
-    if (remainingTiles.length > 0) {
+    if (remainingTiles.length > 0 && !secondaryTilesCollapsed) {
         const strip = document.createElement("div");
         strip.style.display = "flex";
-        strip.style.gap = "16px";
-        strip.style.overflowX = "auto";
-        strip.style.paddingBottom = "6px";
+        strip.style.gap = "12px";
+        strip.style.justifyContent = "center";
+        strip.style.alignItems = "center";
+        strip.style.flexWrap = "wrap";
+        strip.style.overflow = "hidden";
+        strip.style.paddingBottom = "2px";
+        strip.style.width = "100%";
+        strip.style.position = "relative";
+        strip.style.minHeight = "138px";
+
+        const collapseButton = createSecondaryToggleButton(false, () => {
+            secondaryTilesCollapsed = true;
+            renderVideoGrid();
+        });
+        collapseButton.style.position = "absolute";
+        collapseButton.style.left = "50%";
+        collapseButton.style.top = "50%";
+        collapseButton.style.transform = "translate(-50%, -50%)";
+        attachHoverReveal(strip, collapseButton);
 
         for (const tile of remainingTiles) {
             strip.appendChild(createTileElement(tile, false, true));
         }
 
+        strip.appendChild(collapseButton);
         root.appendChild(strip);
     }
 }
@@ -428,6 +595,7 @@ function removeVideoPublication(publication, participant, track) {
 function clearVideoPublications() {
     videoPublications.clear();
     focusedTileKey = null;
+    secondaryTilesCollapsed = false;
     notifyVideoParticipantsChanged();
 }
 
@@ -499,7 +667,10 @@ export async function joinVoiceChannel(serverUrl, token, dotNetObjectReference) 
 }
 
 export async function leaveVoiceChannel() {
-    if (!room) {
+    const currentRoom = room;
+    room = null;
+
+    if (!currentRoom) {
         detachAllRemoteAudioTracks();
         clearVideoPublications();
         voiceParticipants.clear();
@@ -513,14 +684,23 @@ export async function leaveVoiceChannel() {
         return;
     }
 
-    await stopScreenShare();
-    await room.disconnect();
+    try {
+        await stopScreenShare();
+    } catch {
+        // Ignore teardown failures during user-initiated leave.
+    }
+
+    try {
+        await currentRoom.disconnect();
+    } catch {
+        // LiveKit can surface a client-initiated disconnect as an exception while switching rooms.
+    }
+
     detachAllRemoteAudioTracks();
     clearVideoPublications();
     voiceParticipants.clear();
     activeSpeakerIds.clear();
     isDeafened = false;
-    room = null;
     renderVideoGrid();
     if (dotNetRef) {
         await dotNetRef.invokeMethodAsync("HandleActiveSpeakersChanged", []);

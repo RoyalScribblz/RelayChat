@@ -39,6 +39,7 @@ public sealed class VoiceSessionRepository(NodeDbContext dbContext)
             existing.Handle = session.Handle;
             existing.AvatarUrl = session.AvatarUrl;
             existing.IsMuted = session.IsMuted;
+            existing.IsDeafened = session.IsDeafened;
             existing.JoinedAt = session.JoinedAt;
             existing.UpdatedAt = session.UpdatedAt;
         }
@@ -58,7 +59,7 @@ public sealed class VoiceSessionRepository(NodeDbContext dbContext)
         await dbContext.SaveChangesAsync(ct);
     }
 
-    public async Task UpdateMute(Guid userId, bool isMuted, CancellationToken ct = default)
+    public async Task UpdateMuted(Guid userId, bool isMuted, CancellationToken ct = default)
     {
         var existing = await dbContext.VoiceSessions.SingleOrDefaultAsync(session => session.UserId == userId, ct);
         if (existing is null)
@@ -67,6 +68,19 @@ public sealed class VoiceSessionRepository(NodeDbContext dbContext)
         }
 
         existing.IsMuted = isMuted;
+        existing.UpdatedAt = DateTimeOffset.UtcNow;
+        await dbContext.SaveChangesAsync(ct);
+    }
+
+    public async Task UpdateDeafened(Guid userId, bool isDeafened, CancellationToken ct = default)
+    {
+        var existing = await dbContext.VoiceSessions.SingleOrDefaultAsync(session => session.UserId == userId, ct);
+        if (existing is null)
+        {
+            return;
+        }
+
+        existing.IsDeafened = isDeafened;
         existing.UpdatedAt = DateTimeOffset.UtcNow;
         await dbContext.SaveChangesAsync(ct);
     }
