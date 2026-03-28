@@ -5,10 +5,13 @@ const videoPublications = new Map();
 const voiceParticipants = new Map();
 const activeSpeakerIds = new Set();
 const renderedVideoElements = [];
+const renderedTileElements = new Map();
 let screenShareTracks = [];
 let focusedTileKey = null;
 let secondaryTilesCollapsed = false;
 let isDeafened = false;
+let audioContext = null;
+const volumeStoragePrefix = "relaychat.voice.volume";
 
 function describeRoomState() {
     return {
@@ -38,6 +41,70 @@ function getAudioRoot() {
 
 function getAudioTrackKey(publication, participant) {
     return publication?.trackSid ?? publication?.sid ?? participant?.identity ?? crypto.randomUUID();
+}
+
+function normalizeAudioSource(track, publication) {
+    const source = publication?.source ?? track?.source ?? null;
+    if (source === window.LivekitClient?.Track?.Source?.ScreenShareAudio || source === "screen_share_audio") {
+        return "screen";
+    }
+
+    return "voice";
+}
+
+function getVolumeStorageKey(identity, source) {
+    return `${volumeStoragePrefix}.${identity}.${source}`;
+}
+
+function clampVolumePercent(value) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) {
+        return 100;
+    }
+
+    return Math.max(0, Math.min(200, Math.round(parsed)));
+}
+
+function getStoredVolume(identity, source) {
+    try {
+        const storedValue = localStorage.getItem(getVolumeStorageKey(identity, source));
+        return storedValue === null ? 100 : clampVolumePercent(storedValue);
+    } catch {
+        return 100;
+    }
+}
+
+function setStoredVolume(identity, source, volumePercent) {
+    const normalized = clampVolumePercent(volumePercent);
+    try {
+        localStorage.setItem(getVolumeStorageKey(identity, source), String(normalized));
+    } catch {
+        // Ignore storage failures and keep the in-memory applied volume.
+    }
+
+    return normalized;
+}
+
+function getEffectiveGain(volumePercent) {
+    if (isDeafened) {
+        return 0;
+    }
+
+    return clampVolumePercent(volumePercent) / 100;
+}
+
+function ensureAudioContext() {
+    if (audioContext) {
+        return audioContext;
+    }
+
+    const Context = window.AudioContext ?? window.webkitAudioContext;
+    if (!Context) {
+        return null;
+    }
+
+    audioContext = new Context();
+    return audioContext;
 }
 
 function getVideoRoot() {
@@ -100,12 +167,43 @@ function attachRemoteAudioTrack(track, publication, participant) {
         return;
     }
 
+    const identity = getParticipantIdentity(participant);
+    const source = normalizeAudioSource(track, publication);
     const element = track.attach();
     element.autoplay = true;
-    element.muted = isDeafened;
     element.playsInline = true;
+    element.muted = true;
     getAudioRoot().appendChild(element);
-    attachedAudioElements.set(key, { element, track });
+    const volumePercent = getStoredVolume(identity, source);
+    const entry = {
+        element,
+        track,
+        identity,
+        source,
+        volumePercent,
+        sourceNode: null,
+        gainNode: null
+    };
+
+    const context = ensureAudioContext();
+    if (context) {
+        try {
+            entry.sourceNode = context.createMediaElementSource(element);
+            entry.gainNode = context.createGain();
+            entry.sourceNode.connect(entry.gainNode);
+            entry.gainNode.connect(context.destination);
+            entry.gainNode.gain.value = getEffectiveGain(volumePercent);
+            context.resume().catch(() => { });
+        } catch {
+            element.muted = isDeafened;
+            element.volume = Math.min(1, volumePercent / 100);
+        }
+    } else {
+        element.muted = isDeafened;
+        element.volume = Math.min(1, volumePercent / 100);
+    }
+
+    attachedAudioElements.set(key, entry);
 }
 
 function detachRemoteAudioTrack(publication, participant) {
@@ -115,13 +213,28 @@ function detachRemoteAudioTrack(publication, participant) {
         return;
     }
 
+    try {
+        existing.sourceNode?.disconnect();
+        existing.gainNode?.disconnect();
+    } catch {
+        // Ignore Web Audio cleanup failures.
+    }
+
     existing.track.detach(existing.element);
     existing.element.remove();
     attachedAudioElements.delete(key);
 }
 
 function detachAllRemoteAudioTracks() {
-    for (const { element, track } of attachedAudioElements.values()) {
+    for (const entry of attachedAudioElements.values()) {
+        try {
+            entry.sourceNode?.disconnect();
+            entry.gainNode?.disconnect();
+        } catch {
+            // Ignore Web Audio cleanup failures.
+        }
+
+        const { element, track } = entry;
         track.detach(element);
         element.remove();
     }
@@ -130,8 +243,13 @@ function detachAllRemoteAudioTracks() {
 }
 
 function applyPlaybackMute() {
-    for (const { element } of attachedAudioElements.values()) {
-        element.muted = isDeafened;
+    for (const entry of attachedAudioElements.values()) {
+        if (entry.gainNode) {
+            entry.gainNode.gain.value = getEffectiveGain(entry.volumePercent);
+            continue;
+        }
+
+        entry.element.muted = isDeafened;
     }
 }
 
@@ -141,6 +259,7 @@ function clearRenderedVideoElements() {
     }
 
     renderedVideoElements.length = 0;
+    renderedTileElements.clear();
 }
 
 function notifyActiveSpeakersChanged() {
@@ -149,6 +268,36 @@ function notifyActiveSpeakersChanged() {
     }
 
     dotNetRef.invokeMethodAsync("HandleActiveSpeakersChanged", [...activeSpeakerIds]);
+}
+
+function updateTileSpeakingState(entry) {
+    const isSpeaking = !!entry.identity && entry.type !== "screen" && activeSpeakerIds.has(entry.identity);
+    entry.wrapper.style.border = isSpeaking
+        ? "2px solid #5edc93"
+        : "1px solid rgba(154, 164, 178, 0.16)";
+    entry.wrapper.style.boxShadow = isSpeaking
+        ? `${entry.baseShadow}, 0 0 0 4px rgba(94, 220, 147, 0.12)`
+        : entry.baseShadow;
+}
+
+function syncSpeakingDecorations() {
+    for (const entry of renderedTileElements.values()) {
+        updateTileSpeakingState(entry);
+    }
+}
+
+function setActiveSpeakerIdentities(identities) {
+    activeSpeakerIds.clear();
+    for (const identity of identities) {
+        if (!identity) {
+            continue;
+        }
+
+        activeSpeakerIds.add(identity);
+    }
+
+    notifyActiveSpeakersChanged();
+    syncSpeakingDecorations();
 }
 
 function notifyVideoParticipantsChanged() {
@@ -246,17 +395,19 @@ function buildVisualTiles() {
         const screenKey = getVideoPublicationKey(identity, "screen");
         const cameraPublication = videoPublications.get(cameraKey);
         const screenPublication = videoPublications.get(screenKey);
+        const hasActiveCamera = !!cameraPublication && !cameraPublication.isMuted;
+        const hasActiveScreen = !!screenPublication && !screenPublication.isMuted;
 
         tiles.push({
-            key: cameraPublication ? cameraKey : `${identity}|placeholder`,
+            key: hasActiveCamera ? cameraKey : `${identity}|placeholder`,
             identity,
-            type: cameraPublication ? "camera" : "placeholder",
+            type: hasActiveCamera ? "camera" : "placeholder",
             label: participant.name,
             participant,
-            videoPublication: cameraPublication ?? null
+            videoPublication: hasActiveCamera ? cameraPublication : null
         });
 
-        if (screenPublication) {
+        if (hasActiveScreen) {
             tiles.push({
                 key: screenKey,
                 identity,
@@ -269,7 +420,7 @@ function buildVisualTiles() {
     }
 
     for (const publication of videoPublications.values()) {
-        if (voiceParticipants.has(publication.identity)) {
+        if (voiceParticipants.has(publication.identity) || publication.isMuted) {
             continue;
         }
 
@@ -288,7 +439,6 @@ function buildVisualTiles() {
 
 function createTileElement(tile, isFocused, isSecondary) {
     const participant = tile.participant;
-    const isSpeaking = activeSpeakerIds.has(tile.identity);
 
     const wrapper = document.createElement("button");
     wrapper.type = "button";
@@ -298,15 +448,15 @@ function createTileElement(tile, isFocused, isSecondary) {
     wrapper.style.justifyContent = "stretch";
     wrapper.style.padding = "0";
     wrapper.style.flex = isSecondary ? "0 0 200px" : "1 1 auto";
-    wrapper.style.border = isSpeaking ? "2px solid #5edc93" : "1px solid rgba(154, 164, 178, 0.16)";
     wrapper.style.borderRadius = "22px";
     wrapper.style.overflow = "hidden";
     wrapper.style.background = "#0f151d";
     wrapper.style.cursor = "pointer";
     wrapper.style.minHeight = isFocused ? "420px" : isSecondary ? "126px" : "240px";
-    wrapper.style.boxShadow = isFocused
+    const baseShadow = isFocused
         ? "0 22px 48px rgba(0, 0, 0, 0.35)"
         : "0 12px 28px rgba(0, 0, 0, 0.18)";
+    wrapper.style.boxShadow = baseShadow;
     wrapper.style.aspectRatio = isFocused ? "16 / 8.5" : isSecondary ? "16 / 9" : "16 / 10";
     wrapper.onclick = () => {
         focusedTileKey = focusedTileKey === tile.key ? null : tile.key;
@@ -336,7 +486,8 @@ function createTileElement(tile, isFocused, isSecondary) {
         renderedVideoElements.push({ element, track: tile.videoPublication.track });
     }
     else {
-        body.appendChild(createPlaceholderAvatar(participant));
+        const placeholder = createPlaceholderAvatar(participant);
+        body.appendChild(placeholder);
     }
 
     const footer = document.createElement("div");
@@ -345,7 +496,7 @@ function createTileElement(tile, isFocused, isSecondary) {
     footer.style.right = "10px";
     footer.style.bottom = "10px";
     footer.style.display = "flex";
-    footer.style.alignItems = "center";
+    footer.style.alignItems = "flex-end";
     footer.style.justifyContent = "space-between";
     footer.style.gap = "8px";
 
@@ -359,7 +510,9 @@ function createTileElement(tile, isFocused, isSecondary) {
     const badges = document.createElement("div");
     badges.style.display = "flex";
     badges.style.gap = "8px";
-    badges.style.flexWrap = "wrap";
+    badges.style.flexWrap = "nowrap";
+    badges.style.alignItems = "center";
+    badges.style.minHeight = "30px";
 
     if (tile.type === "screen") {
         badges.appendChild(createIconBadge(
@@ -382,14 +535,19 @@ function createTileElement(tile, isFocused, isSecondary) {
         ));
     }
 
-    if (isSpeaking) {
-        badges.appendChild(createBadge("Speaking", { background: "rgba(47, 189, 99, 0.84)" }));
-    }
-
     footer.appendChild(title);
     footer.appendChild(badges);
     body.appendChild(footer);
     wrapper.appendChild(body);
+    const tileEntry = {
+        wrapper,
+        identity: tile.identity,
+        isLocal: isLocalIdentity(tile.identity),
+        type: tile.type,
+        baseShadow
+    };
+    renderedTileElements.set(tile.key, tileEntry);
+    updateTileSpeakingState(tileEntry);
     return wrapper;
 }
 
@@ -475,6 +633,15 @@ function renderVideoGrid() {
         empty.style.color = "#9aa4b2";
         empty.style.textAlign = "center";
         root.appendChild(empty);
+        return;
+    }
+
+    if (tiles.length === 1) {
+        root.style.display = "flex";
+        root.style.flexDirection = "column";
+        root.style.gap = "12px";
+        root.style.alignItems = "stretch";
+        root.appendChild(createTileElement(tiles[0], true, false));
         return;
     }
 
@@ -574,8 +741,34 @@ function upsertVideoPublication(track, publication, participant, isLocal = false
         identity,
         source,
         track,
-        isLocal
+        isLocal,
+        isMuted: !!publication?.isMuted || !!track?.isMuted
     });
+    notifyVideoParticipantsChanged();
+    renderVideoGrid();
+}
+
+function setVideoPublicationMuted(publication, participant, track, isMuted) {
+    const identity = getParticipantIdentity(participant);
+    const source = normalizeVideoSource(track, publication);
+    if (!identity || !source) {
+        return;
+    }
+
+    const key = getVideoPublicationKey(identity, source);
+    const existing = videoPublications.get(key);
+    if (!existing) {
+        if (!isMuted && track) {
+            upsertVideoPublication(track, publication, participant, isLocalIdentity(identity));
+        }
+        return;
+    }
+
+    existing.isMuted = isMuted;
+    if (!isMuted && track) {
+        existing.track = track;
+    }
+
     notifyVideoParticipantsChanged();
     renderVideoGrid();
 }
@@ -622,6 +815,24 @@ export async function joinVoiceChannel(serverUrl, token, dotNetObjectReference) 
         removeVideoPublication(publication, participant, track);
     });
 
+    room.on(window.LivekitClient.RoomEvent.TrackMuted, (publication, participant) => {
+        setVideoPublicationMuted(publication, participant, publication?.track ?? null, true);
+    });
+
+    room.on(window.LivekitClient.RoomEvent.TrackUnmuted, (publication, participant) => {
+        setVideoPublicationMuted(publication, participant, publication?.track ?? null, false);
+    });
+
+    room.on(window.LivekitClient.RoomEvent.LocalTrackUnpublished, publication => {
+        removeVideoPublication(publication, room.localParticipant, publication?.track ?? null);
+    });
+
+    room.on(window.LivekitClient.RoomEvent.LocalTrackPublished, publication => {
+        if (publication?.track) {
+            upsertVideoPublication(publication.track, publication, room.localParticipant, true);
+        }
+    });
+
     room.on(window.LivekitClient.RoomEvent.ParticipantDisconnected, participant => {
         for (const publication of participant.trackPublications.values()) {
             detachRemoteAudioTrack(publication, participant);
@@ -632,15 +843,7 @@ export async function joinVoiceChannel(serverUrl, token, dotNetObjectReference) 
     });
 
     room.on(window.LivekitClient.RoomEvent.ActiveSpeakersChanged, participants => {
-        activeSpeakerIds.clear();
-        for (const participant of participants) {
-            if (participant.identity) {
-                activeSpeakerIds.add(participant.identity);
-            }
-        }
-
-        notifyActiveSpeakersChanged();
-        renderVideoGrid();
+        setActiveSpeakerIdentities(participants.map(participant => participant.identity));
     });
 
     await room.connect(serverUrl, token);
@@ -717,6 +920,10 @@ export function setVoiceParticipants(participants) {
     renderVideoGrid();
 }
 
+export function refreshVoiceGrid() {
+    renderVideoGrid();
+}
+
 export async function setVoiceMuted(isMuted) {
     if (!room) {
         return;
@@ -728,6 +935,29 @@ export async function setVoiceMuted(isMuted) {
 export function setVoiceDeafened(deafened) {
     isDeafened = deafened;
     applyPlaybackMute();
+}
+
+export function getParticipantVolume(identity, source) {
+    return getStoredVolume(identity, source);
+}
+
+export function setParticipantVolume(identity, source, volumePercent) {
+    const normalized = setStoredVolume(identity, source, volumePercent);
+    for (const entry of attachedAudioElements.values()) {
+        if (entry.identity !== identity || entry.source !== source) {
+            continue;
+        }
+
+        entry.volumePercent = normalized;
+        if (entry.gainNode) {
+            entry.gainNode.gain.value = getEffectiveGain(normalized);
+        } else {
+            entry.element.volume = Math.min(1, normalized / 100);
+            entry.element.muted = isDeafened;
+        }
+    }
+
+    return normalized;
 }
 
 export async function setCameraEnabled(isEnabled) {

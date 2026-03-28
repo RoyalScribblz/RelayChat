@@ -14,10 +14,14 @@
     grid-template-columns: 388px minmax(0, 1fr);
 }
 
+.relay-shell--voice .relay-content {
+    padding-bottom: 10px;
+}
+
 .relay-left-panel {
     display: grid;
     grid-template-columns: 72px 292px;
-    grid-template-rows: minmax(0, 1fr) auto;
+    grid-template-rows: minmax(0, 1fr) auto auto;
     height: 100vh;
     min-height: 0;
     padding: 8px;
@@ -196,8 +200,9 @@
 
 .relay-channel-item {
     display: flex;
-    align-items: center;
-    gap: 12px;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
     padding: 11px 12px;
     border-radius: 14px;
     color: #c8d1dd;
@@ -220,6 +225,73 @@
     width: 24px;
     display: flex;
     justify-content: center;
+}
+
+.relay-channel-item__row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.relay-voice-member-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-left: 32px;
+}
+
+.relay-voice-member-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    border-radius: 10px;
+    padding: 2px 4px;
+    cursor: default;
+}
+
+.relay-voice-member-avatar {
+    width: 24px;
+    height: 24px;
+    border-radius: 999px;
+    overflow: hidden;
+    background: #2a3442;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+    border: 2px solid transparent;
+    flex-shrink: 0;
+}
+
+.relay-voice-member-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.relay-voice-member-avatar--speaking {
+    border-color: #2fd474;
+    box-shadow: 0 0 0 3px rgba(47, 212, 116, 0.14);
+}
+
+.relay-voice-member-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13px;
+    color: #d8e0eb;
+}
+
+.relay-voice-member-status {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    color: #d8e0eb;
+    flex-shrink: 0;
 }
 
 .relay-content {
@@ -283,6 +355,19 @@
     justify-content: center;
     flex-wrap: wrap;
     min-height: 0;
+}
+
+.relay-voice-controls-panel {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    align-self: center;
+    padding: 5px 6px;
+    margin-top: -4px;
+    border-radius: 18px;
+    border: 1px solid rgba(160, 175, 196, 0.1);
+    background: rgba(15, 22, 31, 0.96);
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2);
 }
 
 .relay-voice-controls :global(.mud-icon-button-root) {
@@ -422,9 +507,9 @@
 .relay-composer__input {
     display: block;
     width: 100%;
-    min-height: calc(1.5em + 2px);
+    min-height: 1.5em;
     max-height: 33vh;
-    height: calc(1.5em + 2px);
+    height: 1.5em;
     padding: 0;
     margin: 0;
     resize: none;
@@ -435,6 +520,7 @@
     color: #f5f7fa;
     font: inherit;
     line-height: 1.5;
+    box-sizing: content-box;
 }
 
 .relay-composer__input::placeholder {
@@ -443,7 +529,7 @@
 
 .relay-user-pane {
     grid-column: 1 / span 2;
-    grid-row: 2;
+    grid-row: 3;
     display: grid;
     grid-template-columns: 46px minmax(0, 1fr) auto;
     gap: 12px;
@@ -455,6 +541,51 @@
     position: relative;
     z-index: 1;
     box-shadow: 0 14px 32px rgba(0, 0, 0, 0.26);
+}
+
+.relay-voice-connection-panel {
+    grid-column: 1 / span 2;
+    grid-row: 2;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px;
+    align-items: center;
+    padding: 12px;
+    border-radius: 18px;
+    border: 1px solid rgba(160, 175, 196, 0.1);
+    background: rgba(15, 22, 31, 0.96);
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2);
+}
+
+.relay-voice-connection-panel__status {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.relay-voice-connection-panel__indicator {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #2fd474;
+    font-weight: 700;
+    font-size: 13px;
+}
+
+.relay-voice-connection-panel__channel {
+    color: #d8e0eb;
+    font-size: 13px;
+    margin-left: 24px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.relay-voice-connection-panel__actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
 }
 
 .relay-user-pane__main {
@@ -570,6 +701,49 @@
     backdrop-filter: blur(8px);
 }
 
+.relay-voice-volume-menu-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 1290;
+}
+
+.relay-voice-volume-menu {
+    position: fixed;
+    width: 320px;
+    max-width: calc(100vw - 24px);
+    transform: translate(0, -50%);
+    border-radius: 18px;
+    border: 1px solid rgba(160, 175, 196, 0.12);
+    background: rgba(12, 18, 25, 0.98);
+    box-shadow: 0 28px 72px rgba(0, 0, 0, 0.4);
+    padding: 12px 14px;
+}
+
+.relay-voice-volume-menu__body {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.relay-voice-volume-menu__body :global(.mud-icon-root) {
+    color: #eef3f8;
+    flex-shrink: 0;
+}
+
+.relay-voice-volume-menu__slider {
+    flex: 1;
+    width: auto;
+}
+
+.relay-voice-volume-menu__value {
+    width: 48px;
+    text-align: right;
+    color: #d8e0eb;
+    font-size: 13px;
+    font-weight: 600;
+    flex-shrink: 0;
+}
+
 .relay-settings-modal {
     width: min(520px, 100%);
     border-radius: 24px;
@@ -624,7 +798,7 @@
 
     .relay-left-panel {
         grid-template-columns: 1fr;
-        grid-template-rows: auto auto auto;
+        grid-template-rows: auto auto auto auto;
         height: auto;
         padding: 8px;
         gap: 8px;
@@ -654,6 +828,11 @@
     }
 
     .relay-user-pane {
+        grid-column: 1;
+        grid-row: 4;
+    }
+
+    .relay-voice-connection-panel {
         grid-column: 1;
         grid-row: 3;
     }

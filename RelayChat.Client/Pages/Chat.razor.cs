@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Web;
 using Microsoft.JSInterop;
 using MudBlazor;
 using RelayChat.Client.Services;
@@ -15,6 +16,7 @@ public partial class Chat : ComponentBase, IAsyncDisposable
     private readonly List<ChannelDto> channels = [];
     private readonly List<MembershipDto> members = [];
     private readonly List<VoiceParticipantDto> voiceParticipants = [];
+    private readonly Dictionary<Guid, List<VoiceParticipantDto>> voiceParticipantsByChannel = [];
     private string messageText = string.Empty;
     private string editText = string.Empty;
     private string newChannelName = string.Empty;
@@ -35,6 +37,14 @@ public partial class Chat : ComponentBase, IAsyncDisposable
     private bool preferredMuted;
     private bool preferredDeafened;
     private bool shouldScrollMessages;
+    private bool isVoiceVolumeMenuOpen;
+    private double voiceVolumeMenuLeft;
+    private double voiceVolumeMenuTop;
+    private Guid? voiceVolumeTargetUserId;
+    private string voiceVolumeTargetName = string.Empty;
+    private string voiceVolumeTargetSource = "voice";
+    private int voiceVolumePercent = 100;
+    private HashSet<Guid> activeSpeakerIds = [];
 
     [Parameter]
     public Guid? ChannelId { get; set; }
@@ -88,6 +98,20 @@ public partial class Chat : ComponentBase, IAsyncDisposable
     protected IReadOnlyList<ChannelDto> _channels => channels;
     protected IReadOnlyList<MembershipDto> _members => members;
     protected IReadOnlyList<VoiceParticipantDto> _voiceParticipants => voiceParticipants;
+    protected ChannelDto? ActiveVoiceChannel => VoiceClient.ActiveChannelId.HasValue
+        ? channels.FirstOrDefault(channel => channel.Id == VoiceClient.ActiveChannelId.Value)
+        : null;
+    protected bool _showConnectedVoicePanel => VoiceClient.IsConnected && ActiveVoiceChannel is not null;
+    protected bool _isVoiceVolumeMenuOpen => isVoiceVolumeMenuOpen;
+    protected double _voiceVolumeMenuLeft => voiceVolumeMenuLeft;
+    protected double _voiceVolumeMenuTop => voiceVolumeMenuTop;
+    protected string _voiceVolumeTargetName => voiceVolumeTargetName;
+    protected string _voiceVolumeTargetSourceLabel => voiceVolumeTargetSource == "screen" ? "Stream audio" : "Voice audio";
+    protected int _voiceVolumePercent
+    {
+        get => voiceVolumePercent;
+        set => voiceVolumePercent = value;
+    }
     protected IReadOnlyList<ChatDayGroup> _chatDays => BuildChatDays();
     protected Guid? _editingMessageId => editingMessageId;
     protected ChannelType _newChannelType
@@ -136,6 +160,7 @@ public partial class Chat : ComponentBase, IAsyncDisposable
         ChatClient.MemberUpdated += OnMemberUpdated;
         ChatClient.VoiceChannelStateReceived += OnVoiceChannelStateReceived;
         ChatClient.Reconnected += OnReconnected;
+        VoiceClient.ActiveSpeakersChanged += OnActiveSpeakersChanged;
     }
 
     protected override async Task OnParametersSetAsync()
@@ -185,12 +210,6 @@ public partial class Chat : ComponentBase, IAsyncDisposable
             return;
         }
 
-        if (VoiceClient.ActiveChannelId.HasValue)
-        {
-            await LeaveVoiceChannel();
-        }
-
-        await RegisterComposer();
         await LoadTextChannel(selectedChannel.Id);
     }
 
@@ -199,6 +218,20 @@ public partial class Chat : ComponentBase, IAsyncDisposable
         if (firstRender)
         {
             chatModule ??= await JsRuntime.InvokeAsync<IJSObjectReference>("import", "./js/chatPage.js");
+        }
+
+        if (_isTextChannel)
+        {
+            await RegisterComposer();
+        }
+        else if (composerRegistered)
+        {
+            await UnregisterComposer();
+        }
+
+        if (_isVoiceChannel && VoiceClient.IsConnected)
+        {
+            await VoiceClient.RefreshGrid();
         }
 
         if (shouldScrollMessages && chatModule is not null)
@@ -357,6 +390,38 @@ public partial class Chat : ComponentBase, IAsyncDisposable
         NavigationManager.NavigateTo("/");
     }
 
+    protected async Task OpenVoiceRowVolumeMenu(MouseEventArgs args, VoiceParticipantDto participant)
+    {
+        await OpenVoiceVolumeMenu(
+            participant.UserId,
+            participant.Name,
+            "voice",
+            args.ClientX,
+            args.ClientY);
+    }
+
+    protected void CloseVoiceVolumeMenu()
+    {
+        isVoiceVolumeMenuOpen = false;
+    }
+
+    protected async Task HandleVoiceVolumeChanged(ChangeEventArgs args)
+    {
+        if (!voiceVolumeTargetUserId.HasValue)
+        {
+            return;
+        }
+
+        var parsed = 100;
+        if (args.Value is not null && int.TryParse(args.Value.ToString(), out var value))
+        {
+            parsed = value;
+        }
+
+        voiceVolumePercent = Math.Clamp(parsed, 0, 200);
+        await VoiceClient.SetParticipantVolume(voiceVolumeTargetUserId.Value, voiceVolumeTargetSource, voiceVolumePercent);
+    }
+
     protected void OpenSettings()
     {
         profileName = AuthService.Name ?? string.Empty;
@@ -398,6 +463,7 @@ public partial class Chat : ComponentBase, IAsyncDisposable
 
             isSettingsOpen = false;
             await LoadShellContext();
+            await RefreshActiveVoiceState();
         }
         catch (Exception ex)
         {
@@ -450,6 +516,12 @@ public partial class Chat : ComponentBase, IAsyncDisposable
     protected string GetMemberInitial(MembershipDto member)
     {
         var value = string.IsNullOrWhiteSpace(member.Name) ? member.Handle : member.Name;
+        return string.IsNullOrWhiteSpace(value) ? "?" : value[..1].ToUpperInvariant();
+    }
+
+    protected string GetVoiceParticipantInitial(VoiceParticipantDto participant)
+    {
+        var value = string.IsNullOrWhiteSpace(participant.Name) ? participant.Handle : participant.Name;
         return string.IsNullOrWhiteSpace(value) ? "?" : value[..1].ToUpperInvariant();
     }
 
@@ -612,6 +684,19 @@ public partial class Chat : ComponentBase, IAsyncDisposable
         return SendMessage();
     }
 
+    [JSInvokable]
+    public Task HandleVoiceVolumeContextMenu(string identity, string source, double clientX, double clientY)
+    {
+        if (!Guid.TryParse(identity, out var userId))
+        {
+            return Task.CompletedTask;
+        }
+
+        var participant = voiceParticipants.FirstOrDefault(current => current.UserId == userId);
+        var name = participant?.Name ?? identity;
+        return OpenVoiceVolumeMenu(userId, name, source, clientX, clientY);
+    }
+
     public async ValueTask DisposeAsync()
     {
         ChatClient.MessageReceived -= OnMessageReceived;
@@ -619,6 +704,7 @@ public partial class Chat : ComponentBase, IAsyncDisposable
         ChatClient.MemberUpdated -= OnMemberUpdated;
         ChatClient.VoiceChannelStateReceived -= OnVoiceChannelStateReceived;
         ChatClient.Reconnected -= OnReconnected;
+        VoiceClient.ActiveSpeakersChanged -= OnActiveSpeakersChanged;
 
         await LeaveVoiceChannel();
         await UnregisterComposer();
@@ -776,22 +862,21 @@ public partial class Chat : ComponentBase, IAsyncDisposable
         if (!VoiceClient.ActiveChannelId.HasValue)
         {
             voiceParticipants.Clear();
+            voiceParticipantsByChannel.Clear();
+            activeSpeakerIds.Clear();
             return;
         }
 
         await ChatClient.LeaveVoiceChannel();
         await VoiceClient.Leave();
         voiceParticipants.Clear();
+        voiceParticipantsByChannel.Clear();
+        activeSpeakerIds.Clear();
     }
 
     private async Task RegisterComposer()
     {
         chatModule ??= await JsRuntime.InvokeAsync<IJSObjectReference>("import", "./js/chatPage.js");
-        if (composerRegistered)
-        {
-            return;
-        }
-
         callbackReference ??= DotNetObjectReference.Create(this);
         await chatModule.InvokeVoidAsync("registerComposer", callbackReference, ComposerId);
         composerRegistered = true;
@@ -852,6 +937,18 @@ public partial class Chat : ComponentBase, IAsyncDisposable
         await InvokeAsync(StateHasChanged);
     }
 
+    private async Task OpenVoiceVolumeMenu(Guid userId, string name, string source, double clientX, double clientY)
+    {
+        voiceVolumeTargetUserId = userId;
+        voiceVolumeTargetName = name;
+        voiceVolumeTargetSource = source;
+        voiceVolumePercent = await VoiceClient.GetParticipantVolume(userId, source);
+        voiceVolumeMenuLeft = clientX;
+        voiceVolumeMenuTop = clientY;
+        isVoiceVolumeMenuOpen = true;
+        await InvokeAsync(StateHasChanged);
+    }
+
     private void OnMessageReceived(MessageDto message)
     {
         if (!_isTextChannel || !ChannelId.HasValue || message.ChannelId != ChannelId.Value)
@@ -882,8 +979,11 @@ public partial class Chat : ComponentBase, IAsyncDisposable
 
     private void OnVoiceChannelStateReceived(VoiceChannelStateDto state)
     {
-        if (!_isVoiceChannel || !ChannelId.HasValue || state.ChannelId != ChannelId.Value)
+        voiceParticipantsByChannel[state.ChannelId] = state.Participants.ToList();
+
+        if (!VoiceClient.ActiveChannelId.HasValue || state.ChannelId != VoiceClient.ActiveChannelId.Value)
         {
+            _ = InvokeAsync(StateHasChanged);
             return;
         }
 
@@ -895,6 +995,12 @@ public partial class Chat : ComponentBase, IAsyncDisposable
             await VoiceClient.SetVoiceParticipants(voiceParticipants);
             StateHasChanged();
         });
+    }
+
+    private void OnActiveSpeakersChanged(IReadOnlySet<Guid> speakerIds)
+    {
+        activeSpeakerIds = speakerIds.ToHashSet();
+        _ = InvokeAsync(StateHasChanged);
     }
 
     private void OnMemberUpdated(MembershipDto membership)
@@ -926,6 +1032,24 @@ public partial class Chat : ComponentBase, IAsyncDisposable
             };
         }
 
+        foreach (var state in voiceParticipantsByChannel)
+        {
+            for (var index = 0; index < state.Value.Count; index++)
+            {
+                if (state.Value[index].UserId != membership.UserId)
+                {
+                    continue;
+                }
+
+                state.Value[index] = state.Value[index] with
+                {
+                    Name = membership.Name,
+                    Handle = membership.Handle,
+                    AvatarUrl = membership.AvatarUrl
+                };
+            }
+        }
+
         for (var index = 0; index < messages.Count; index++)
         {
             var current = messages[index];
@@ -944,7 +1068,7 @@ public partial class Chat : ComponentBase, IAsyncDisposable
 
         _ = InvokeAsync(async () =>
         {
-            if (_isVoiceChannel)
+            if (VoiceClient.IsConnected)
             {
                 await VoiceClient.SetVoiceParticipants(voiceParticipants);
             }
@@ -955,11 +1079,16 @@ public partial class Chat : ComponentBase, IAsyncDisposable
 
     private async Task OnReconnected()
     {
-        if (_isVoiceChannel && ChannelId.HasValue)
+        if (VoiceClient.ActiveChannelId.HasValue)
         {
-            var state = await NodeApiClient.GetVoiceChannelState(ChannelId.Value);
+            var state = await NodeApiClient.GetVoiceChannelState(VoiceClient.ActiveChannelId.Value);
             voiceParticipants.Clear();
             voiceParticipants.AddRange(state?.Participants ?? []);
+            if (VoiceClient.ActiveChannelId.HasValue)
+            {
+                voiceParticipantsByChannel[VoiceClient.ActiveChannelId.Value] = voiceParticipants.ToList();
+            }
+            EnsureLocalVoiceParticipant();
             await VoiceClient.SetVoiceParticipants(voiceParticipants);
             await InvokeAsync(StateHasChanged);
             return;
@@ -1069,6 +1198,22 @@ public partial class Chat : ComponentBase, IAsyncDisposable
         }
     }
 
+    private async Task RefreshActiveVoiceState()
+    {
+        if (!VoiceClient.ActiveChannelId.HasValue)
+        {
+            return;
+        }
+
+        var state = await NodeApiClient.GetVoiceChannelState(VoiceClient.ActiveChannelId.Value);
+        voiceParticipants.Clear();
+        voiceParticipants.AddRange(state?.Participants ?? []);
+        voiceParticipantsByChannel[VoiceClient.ActiveChannelId.Value] = voiceParticipants.ToList();
+        EnsureLocalVoiceParticipant();
+        await VoiceClient.SetVoiceParticipants(voiceParticipants);
+        await InvokeAsync(StateHasChanged);
+    }
+
     private Guid? GetLastConfirmedMessageId()
     {
         return messages
@@ -1140,7 +1285,7 @@ public partial class Chat : ComponentBase, IAsyncDisposable
 
     private void EnsureLocalVoiceParticipant()
     {
-        if (!VoiceClient.IsConnected || !ChannelId.HasValue || !AuthService.UserId.HasValue)
+        if (!VoiceClient.IsConnected || !VoiceClient.ActiveChannelId.HasValue || !AuthService.UserId.HasValue)
         {
             return;
         }
@@ -1152,12 +1297,34 @@ public partial class Chat : ComponentBase, IAsyncDisposable
 
         voiceParticipants.Add(new VoiceParticipantDto(
             AuthService.UserId.Value,
-            ChannelId.Value,
+            VoiceClient.ActiveChannelId.Value,
             AuthService.Name ?? AuthService.Handle ?? "You",
             AuthService.Handle ?? "you",
             AuthService.AvatarUrl,
             VoiceClient.IsMuted,
             VoiceClient.IsDeafened));
+    }
+
+    protected bool IsVoiceParticipantSpeaking(Guid userId)
+    {
+        return activeSpeakerIds.Contains(userId);
+    }
+
+    protected IReadOnlyList<VoiceParticipantDto> GetVoiceParticipantsForChannel(Guid channelId)
+    {
+        if (VoiceClient.ActiveChannelId == channelId)
+        {
+            return voiceParticipants;
+        }
+
+        return voiceParticipantsByChannel.TryGetValue(channelId, out var participants)
+            ? participants
+            : [];
+    }
+
+    protected bool IsCurrentUser(Guid userId)
+    {
+        return AuthService.UserId.HasValue && AuthService.UserId.Value == userId;
     }
 
     protected sealed class ChatDayGroup(DateOnly day)

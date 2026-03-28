@@ -85,22 +85,139 @@
                     <div class="relay-channel-list">
                         @foreach (var channel in _channels)
                         {
-                            <a href="@GetChannelHref(channel)"
-                               class="relay-channel-item @(IsCurrentChannel(channel) ? "relay-channel-item--active" : string.Empty)"
-                               draggable="@_canReorderChannels"
-                               @ondragstart="@(() => BeginChannelDrag(channel.Id))"
-                               @ondragover:preventDefault
-                               @ondrop="@(() => DropChannel(channel.Id))">
-                                <div class="relay-channel-item__icon">
-                                    <MudIcon Icon="@GetChannelIcon(channel)" />
+                            var voiceParticipants = channel.Type == ChannelType.Voice
+                                ? GetVoiceParticipantsForChannel(channel.Id)
+                                : [];
+
+                            if (_isVoiceChannel && VoiceClient.ActiveChannelId == channel.Id)
+                            {
+                                <div class="relay-channel-item relay-channel-item--active"
+                                     draggable="@_canReorderChannels"
+                                     @ondragstart="@(() => BeginChannelDrag(channel.Id))"
+                                     @ondragover:preventDefault
+                                     @ondrop="@(() => DropChannel(channel.Id))">
+                                    <div class="relay-channel-item__row">
+                                        <div class="relay-channel-item__icon">
+                                            <MudIcon Icon="@GetChannelIcon(channel)" />
+                                        </div>
+                                        <span>@GetChannelLabel(channel)</span>
+                                    </div>
+                                    @if (voiceParticipants.Count > 0)
+                                    {
+                                        <div class="relay-voice-member-list">
+                                            @foreach (var participant in voiceParticipants)
+                                            {
+                                                <div class="relay-voice-member-row"
+                                                     @oncontextmenu:preventDefault="@(!IsCurrentUser(participant.UserId))"
+                                                     @oncontextmenu="@(args => IsCurrentUser(participant.UserId) ? Task.CompletedTask : OpenVoiceRowVolumeMenu(args, participant))">
+                                                    <div class="relay-voice-member-avatar @(IsVoiceParticipantSpeaking(participant.UserId) ? "relay-voice-member-avatar--speaking" : string.Empty)">
+                                                        @if (!string.IsNullOrWhiteSpace(participant.AvatarUrl))
+                                                        {
+                                                            <img src="@participant.AvatarUrl" alt="@participant.Name" />
+                                                        }
+                                                        else
+                                                        {
+                                                            <span>@GetVoiceParticipantInitial(participant)</span>
+                                                        }
+                                                    </div>
+                                                    <span class="relay-voice-member-name">@participant.Name</span>
+                                                    <div class="relay-voice-member-status">
+                                                        @if (participant.IsMuted)
+                                                        {
+                                                            <MudIcon Icon="@Icons.Material.Rounded.MicOff" Size="Size.Small" />
+                                                        }
+                                                        @if (participant.IsDeafened)
+                                                        {
+                                                            <MudIcon Icon="@Icons.Material.Rounded.HeadsetOff" Size="Size.Small" />
+                                                        }
+                                                    </div>
+                                                </div>
+                                            }
+                                        </div>
+                                    }
                                 </div>
-                                <span>@GetChannelLabel(channel)</span>
-                            </a>
+                            }
+                            else
+                            {
+                                <a href="@GetChannelHref(channel)"
+                                   class="relay-channel-item @(IsCurrentChannel(channel) ? "relay-channel-item--active" : string.Empty)"
+                                   draggable="@_canReorderChannels"
+                                   @ondragstart="@(() => BeginChannelDrag(channel.Id))"
+                                   @ondragover:preventDefault
+                                   @ondrop="@(() => DropChannel(channel.Id))">
+                                    <div class="relay-channel-item__row">
+                                        <div class="relay-channel-item__icon">
+                                            <MudIcon Icon="@GetChannelIcon(channel)" />
+                                        </div>
+                                        <span>@GetChannelLabel(channel)</span>
+                                    </div>
+                                    @if (voiceParticipants.Count > 0)
+                                    {
+                                        <div class="relay-voice-member-list">
+                                            @foreach (var participant in voiceParticipants)
+                                            {
+                                                <div class="relay-voice-member-row"
+                                                     @oncontextmenu:preventDefault="@(!IsCurrentUser(participant.UserId))"
+                                                     @oncontextmenu="@(args => IsCurrentUser(participant.UserId) ? Task.CompletedTask : OpenVoiceRowVolumeMenu(args, participant))">
+                                                    <div class="relay-voice-member-avatar @(IsVoiceParticipantSpeaking(participant.UserId) ? "relay-voice-member-avatar--speaking" : string.Empty)">
+                                                        @if (!string.IsNullOrWhiteSpace(participant.AvatarUrl))
+                                                        {
+                                                            <img src="@participant.AvatarUrl" alt="@participant.Name" />
+                                                        }
+                                                        else
+                                                        {
+                                                            <span>@GetVoiceParticipantInitial(participant)</span>
+                                                        }
+                                                    </div>
+                                                    <span class="relay-voice-member-name">@participant.Name</span>
+                                                    <div class="relay-voice-member-status">
+                                                        @if (participant.IsMuted)
+                                                        {
+                                                            <MudIcon Icon="@Icons.Material.Rounded.MicOff" Size="Size.Small" />
+                                                        }
+                                                        @if (participant.IsDeafened)
+                                                        {
+                                                            <MudIcon Icon="@Icons.Material.Rounded.HeadsetOff" Size="Size.Small" />
+                                                        }
+                                                    </div>
+                                                </div>
+                                            }
+                                        </div>
+                                    }
+                                </a>
+                            }
                         }
                     </div>
                 }
             </div>
         </section>
+
+        @if (_showConnectedVoicePanel)
+        {
+            <div class="relay-voice-connection-panel">
+                <div class="relay-voice-connection-panel__status">
+                    <div class="relay-voice-connection-panel__indicator">
+                        <MudIcon Icon="@Icons.Material.Rounded.Wifi" />
+                        <span>Voice Connected</span>
+                    </div>
+                    <div class="relay-voice-connection-panel__channel">@ActiveVoiceChannel!.Name</div>
+                </div>
+                <div class="relay-voice-connection-panel__actions">
+                    <MudIconButton Icon="@(_isCameraEnabled ? Icons.Material.Rounded.Videocam : Icons.Material.Rounded.VideocamOff)"
+                                   Size="Size.Small"
+                                   Color="@(_isCameraEnabled ? Color.Success : Color.Default)"
+                                   OnClick="ToggleCamera" />
+                    <MudIconButton Icon="@(_isScreenShareEnabled ? Icons.Material.Rounded.StopScreenShare : Icons.Material.Rounded.ScreenShare)"
+                                   Size="Size.Small"
+                                   Color="@(_isScreenShareEnabled ? Color.Success : Color.Default)"
+                                   OnClick="ToggleScreenShare" />
+                    <MudIconButton Icon="@Icons.Material.Rounded.CallEnd"
+                                   Size="Size.Small"
+                                   Color="Color.Error"
+                                   OnClick="DisconnectVoice" />
+                </div>
+            </div>
+        }
 
         <div class="relay-user-pane">
             <button type="button" class="relay-user-pane__main" @onclick="OpenSettings">
@@ -171,7 +288,8 @@
                 <div id="livekit-video-grid" class="relay-voice-grid"></div>
             </div>
 
-            <div class="relay-voice-controls">
+            <div class="relay-voice-controls-panel">
+                <div class="relay-voice-controls">
                 <MudIconButton Icon="@(_isVoiceMuted ? Icons.Material.Rounded.MicOff : Icons.Material.Rounded.Mic)"
                                Size="Size.Medium"
                                Color="@(_isVoiceMuted ? Color.Warning : Color.Default)"
@@ -197,6 +315,7 @@
                                Color="Color.Error"
                                OnClick="DisconnectVoice"
                                Disabled="@(!_isConnectedToVoiceChannel)" />
+                </div>
             </div>
         }
         else
@@ -302,6 +421,7 @@
             <div class="relay-composer">
                 <textarea id="@ComposerId"
                           class="relay-composer__input"
+                          rows="1"
                           placeholder="Message #@_currentChannelName"
                           @bind="_messageText"
                           @bind:event="oninput"></textarea>
@@ -357,6 +477,27 @@
         </aside>
     }
 </div>
+
+@if (_isVoiceVolumeMenuOpen)
+{
+    <div class="relay-voice-volume-menu-backdrop" @onclick="CloseVoiceVolumeMenu">
+        <div class="relay-voice-volume-menu"
+             style="@($"left: {_voiceVolumeMenuLeft}px; top: {_voiceVolumeMenuTop}px;")"
+             @onclick:stopPropagation>
+            <div class="relay-voice-volume-menu__body">
+                <MudIcon Icon="@Icons.Material.Rounded.VolumeUp" />
+                <input class="relay-voice-volume-menu__slider"
+                       type="range"
+                       min="0"
+                       max="200"
+                       step="1"
+                       value="@_voiceVolumePercent"
+                       @oninput="HandleVoiceVolumeChanged" />
+                <span class="relay-voice-volume-menu__value">@($"{_voiceVolumePercent}%")</span>
+            </div>
+        </div>
+    </div>
+}
 
 @if (_isSettingsOpen)
 {

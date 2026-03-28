@@ -106,6 +106,36 @@ public sealed class VoiceClient(IJSRuntime jsRuntime) : IAsyncDisposable
         return result;
     }
 
+    public async Task<int> GetParticipantVolume(Guid userId, string source)
+    {
+        if (module is null)
+        {
+            return 100;
+        }
+
+        return await module.InvokeAsync<int>("getParticipantVolume", userId.ToString(), source);
+    }
+
+    public async Task SetParticipantVolume(Guid userId, string source, int volumePercent)
+    {
+        if (module is null)
+        {
+            return;
+        }
+
+        await module.InvokeVoidAsync("setParticipantVolume", userId.ToString(), source, volumePercent);
+    }
+
+    public async Task RefreshGrid()
+    {
+        if (module is null)
+        {
+            return;
+        }
+
+        await module.InvokeVoidAsync("refreshVoiceGrid");
+    }
+
     [JSInvokable]
     public Task HandleActiveSpeakersChanged(string[] identities)
     {
