@@ -1,11 +1,7 @@
 services:
   relaychat-controlplane:
     container_name: relaychat-controlplane-staging
-    build:
-      context: ../..
-      dockerfile: RelayChat.ControlPlane.Api/Dockerfile
-      args:
-        BUILD_CONFIGURATION: Release
+    image: ghcr.io/royalscribblz/relaychat-controlplane:latest
     environment:
       ASPNETCORE_ENVIRONMENT: Staging
       ConnectionStrings__ControlPlaneDatabase: Host=controlplane-postgres;Port=5432;Database=${CONTROLPLANE_DB_NAME};Username=${CONTROLPLANE_DB_USER};Password=${CONTROLPLANE_DB_PASSWORD}

@@ -1,0 +1,95 @@
+name: Publish GHCR Images
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAMESPACE: ghcr.io/royalscribblz
+
+jobs:
+  publish-api-images:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Control Plane image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: RelayChat.ControlPlane.Api/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAMESPACE }}/relaychat-controlplane:latest
+            ${{ env.IMAGE_NAMESPACE }}/relaychat-controlplane:${{ github.sha }}
+
+      - name: Build and push Node image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: RelayChat.Node.Api/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAMESPACE }}/relaychat-node:latest
+            ${{ env.IMAGE_NAMESPACE }}/relaychat-node:${{ github.sha }}
+
+  publish-client-images:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push staging client image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: RelayChat.Client/Dockerfile
+          push: true
+          build-args: |
+            WASM_APPLICATION_ENVIRONMENT_NAME=Staging
+            NODE_API_BASE_URL=${{ vars.STAGING_NODE_API_BASE_URL }}
+            CONTROLPLANE_API_BASE_URL=${{ vars.STAGING_CONTROLPLANE_API_BASE_URL }}
+          tags: |
+            ${{ env.IMAGE_NAMESPACE }}/relaychat-client:latest-staging
+            ${{ env.IMAGE_NAMESPACE }}/relaychat-client:staging-${{ github.sha }}
+
+      - name: Build and push production client image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: RelayChat.Client/Dockerfile
+          push: true
+          build-args: |
+            WASM_APPLICATION_ENVIRONMENT_NAME=Production
+            NODE_API_BASE_URL=${{ vars.PRODUCTION_NODE_API_BASE_URL }}
+            CONTROLPLANE_API_BASE_URL=${{ vars.PRODUCTION_CONTROLPLANE_API_BASE_URL }}
+          tags: |
+            ${{ env.IMAGE_NAMESPACE }}/relaychat-client:latest-production
+            ${{ env.IMAGE_NAMESPACE }}/relaychat-client:production-${{ github.sha }}

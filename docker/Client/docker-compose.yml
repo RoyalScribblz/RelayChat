@@ -1,11 +1,7 @@
 services:
   relaychat-client:
     container_name: relaychat-client-staging
-    build:
-      context: ../..
-      dockerfile: RelayChat.Client/Dockerfile
-      args:
-        BUILD_CONFIGURATION: Release
+    image: ghcr.io/royalscribblz/relaychat-client:latest-staging
     ports:
       - "27060:8080"
     restart: unless-stopped

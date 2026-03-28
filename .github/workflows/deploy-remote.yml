@@ -1,0 +1,55 @@
+name: Deploy Remote Environment
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Deployment target
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Setup SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Deploy selected environment
+        env:
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          TARGET_ENV: ${{ inputs.environment }}
+        run: |
+          ssh "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "export TARGET_ENV='${TARGET_ENV}' GHCR_USERNAME='${GHCR_USERNAME}' GHCR_TOKEN='${GHCR_TOKEN}'; bash -s" <<'EOF'
+          set -euo pipefail
+
+          base_dir="$HOME/docker/relaychat/${TARGET_ENV}"
+
+          echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
+
+          cd "$base_dir/client"
+          docker compose -f docker-compose.yml pull relaychat-client
+          docker compose -f docker-compose.yml up -d --force-recreate --no-deps relaychat-client
+
+          cd "$base_dir/controlplane"
+          docker compose -f docker-compose.yml pull relaychat-controlplane
+          docker compose -f docker-compose.yml up -d --force-recreate --no-deps relaychat-controlplane
+
+          cd "$base_dir/node"
+          docker compose -f docker-compose.yml pull relaychat-node
+          docker compose -f docker-compose.yml up -d --force-recreate --no-deps relaychat-node
+          EOF

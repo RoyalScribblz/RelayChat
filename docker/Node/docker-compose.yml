@@ -1,11 +1,7 @@
 services:
   relaychat-node:
     container_name: relaychat-node-staging
-    build:
-      context: ../..
-      dockerfile: RelayChat.Node.Api/Dockerfile
-      args:
-        BUILD_CONFIGURATION: Release
+    image: ghcr.io/royalscribblz/relaychat-node:latest
     environment:
       ASPNETCORE_ENVIRONMENT: Staging
       ConnectionStrings__NodeDatabase: Host=node-postgres;Port=5432;Database=${NODE_DB_NAME};Username=${NODE_DB_USER};Password=${NODE_DB_PASSWORD}
