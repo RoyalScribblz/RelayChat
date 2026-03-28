@@ -1,0 +1,14 @@
+# Template LiveKit config for staging.
+# Replace every TODO value before use.
+
+port: 7880
+bind_addresses:
+  - ""
+
+rtc:
+  port_range_start: 7881
+  port_range_end: 7882
+  use_external_ip: true
+
+keys:
+  TODO_API_KEY: TODO_API_SECRET

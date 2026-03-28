@@ -1,0 +1,44 @@
+services:
+  relaychat-controlplane:
+    container_name: relaychat-controlplane-staging
+    build:
+      context: ../..
+      dockerfile: RelayChat.ControlPlane.Api/Dockerfile
+      args:
+        BUILD_CONFIGURATION: Release
+    environment:
+      ASPNETCORE_ENVIRONMENT: Staging
+      ConnectionStrings__ControlPlaneDatabase: Host=controlplane-postgres;Port=5432;Database=${CONTROLPLANE_DB_NAME};Username=${CONTROLPLANE_DB_USER};Password=${CONTROLPLANE_DB_PASSWORD}
+      Authentik__Authority: ${AUTHENTIK_AUTHORITY}
+      Authentik__ClientId: ${AUTHENTIK_CLIENT_ID}
+      Authentik__ClientSecret: ${AUTHENTIK_CLIENT_SECRET}
+      RelayTokens__Issuer: ${RELAY_TOKEN_ISSUER}
+      RelayTokens__AccessAudience: ${RELAY_ACCESS_AUDIENCE}
+      RelayTokens__RefreshAudience: ${RELAY_REFRESH_AUDIENCE}
+      RelayTokens__NodeAudience: ${RELAY_NODE_AUDIENCE}
+      RelayTokens__SigningKey: ${RELAY_SIGNING_KEY}
+    depends_on:
+      controlplane-postgres:
+        condition: service_healthy
+    ports:
+      - "27061:8080"
+    restart: unless-stopped
+
+  controlplane-postgres:
+    container_name: relaychat-controlplane-postgres-staging
+    image: postgres:17
+    environment:
+      POSTGRES_DB: ${CONTROLPLANE_DB_NAME}
+      POSTGRES_USER: ${CONTROLPLANE_DB_USER}
+      POSTGRES_PASSWORD: ${CONTROLPLANE_DB_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${CONTROLPLANE_DB_USER} -d ${CONTROLPLANE_DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - controlplane-postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  controlplane-postgres-data:
