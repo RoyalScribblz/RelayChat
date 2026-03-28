@@ -9,7 +9,7 @@ services:
       RelayTokens__Issuer: ${RELAY_TOKEN_ISSUER}
       RelayTokens__NodeAudience: ${RELAY_NODE_AUDIENCE}
       RelayTokens__SigningKey: ${RELAY_SIGNING_KEY}
-      LiveKit__ServerUrl: http://node-livekit:7880
+      LiveKit__ServerUrl: http://node-livekit:27063
       LiveKit__WebSocketUrl: ${LIVEKIT_PUBLIC_WS_URL}
       LiveKit__ApiKey: ${LIVEKIT_API_KEY}
       LiveKit__ApiSecret: ${LIVEKIT_API_SECRET}
@@ -47,9 +47,9 @@ services:
     volumes:
       - ./livekit.yaml:/etc/livekit/livekit.yaml:ro
     ports:
-      - "27063:7880"
-      - "27064:7881"
-      - "27065:7882/udp"
+      - "27063:27063"
+      - "27064:27064"
+      - "27065:27065/udp"
     restart: unless-stopped
 
 volumes:
