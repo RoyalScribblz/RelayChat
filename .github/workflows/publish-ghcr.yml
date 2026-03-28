@@ -74,8 +74,8 @@ jobs:
           push: true
           build-args: |
             WASM_APPLICATION_ENVIRONMENT_NAME=Staging
-            NODE_API_BASE_URL=${{ vars.STAGING_NODE_API_BASE_URL }}
-            CONTROLPLANE_API_BASE_URL=${{ vars.STAGING_CONTROLPLANE_API_BASE_URL }}
+            NODE_API_BASE_URL=https://node.staging.relaychat.chat
+            CONTROLPLANE_API_BASE_URL=https://controlplane.staging.relaychat.chat
           tags: |
             ${{ env.IMAGE_NAMESPACE }}/relaychat-client:latest-staging
             ${{ env.IMAGE_NAMESPACE }}/relaychat-client:staging-${{ github.sha }}
