@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.Extensions.Logging;
 using Microsoft.EntityFrameworkCore;
 using RelayChat.ControlPlane.Api;
 using RelayChat.ControlPlane.Database;
@@ -58,7 +59,7 @@ builder.Services.AddAuthentication(options =>
         options.ClientSecret = authentik.ClientSecret;
         options.ResponseType = "code";
         options.UsePkce = true;
-        options.SaveTokens = true;
+        options.SaveTokens = false;
         options.GetClaimsFromUserInfoEndpoint = false;
         options.RequireHttpsMetadata = false;
         options.CallbackPath = "/signin-oidc";
@@ -67,6 +68,25 @@ builder.Services.AddAuthentication(options =>
         options.Scope.Add("openid");
         options.Scope.Add("profile");
         options.Scope.Add("email");
+        options.Events = new OpenIdConnectEvents
+        {
+            OnAuthenticationFailed = context =>
+            {
+                var logger = context.HttpContext.RequestServices
+                    .GetRequiredService<ILoggerFactory>()
+                    .CreateLogger("RelayChat.ControlPlane.Auth");
+                logger.LogError(context.Exception, "OIDC authentication failed.");
+                return Task.CompletedTask;
+            },
+            OnRemoteFailure = context =>
+            {
+                var logger = context.HttpContext.RequestServices
+                    .GetRequiredService<ILoggerFactory>()
+                    .CreateLogger("RelayChat.ControlPlane.Auth");
+                logger.LogError(context.Failure, "OIDC remote failure.");
+                return Task.CompletedTask;
+            }
+        };
     })
     .AddJwtBearer(options =>
     {
