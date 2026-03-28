@@ -5,6 +5,7 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Staging
       ConnectionStrings__ControlPlaneDatabase: Host=controlplane-postgres;Port=5432;Database=${CONTROLPLANE_DB_NAME};Username=${CONTROLPLANE_DB_USER};Password=${CONTROLPLANE_DB_PASSWORD}
+      Cors__AllowedOrigins__0: ${CLIENT_ORIGIN}
       Authentik__Authority: ${AUTHENTIK_AUTHORITY}
       Authentik__ClientId: ${AUTHENTIK_CLIENT_ID}
       Authentik__ClientSecret: ${AUTHENTIK_CLIENT_SECRET}
@@ -16,6 +17,8 @@ services:
     depends_on:
       controlplane-postgres:
         condition: service_healthy
+      authentik-server:
+        condition: service_started
     ports:
       - "27061:8080"
     restart: unless-stopped
@@ -36,5 +39,94 @@ services:
       - controlplane-postgres-data:/var/lib/postgresql/data
     restart: unless-stopped
 
+  authentik-postgresql:
+    container_name: relaychat-authentik-postgres-staging
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${AUTHENTIK_POSTGRES_DB}
+      POSTGRES_USER: ${AUTHENTIK_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${AUTHENTIK_POSTGRES_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${AUTHENTIK_POSTGRES_USER} -d ${AUTHENTIK_POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - authentik-postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  authentik-redis:
+    container_name: relaychat-authentik-redis-staging
+    image: redis:alpine
+    command:
+      - sh
+      - -c
+      - redis-server --requirepass "$${AUTHENTIK_REDIS_PASSWORD}"
+    environment:
+      AUTHENTIK_REDIS_PASSWORD: ${AUTHENTIK_REDIS_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$${AUTHENTIK_REDIS_PASSWORD}\" ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - authentik-redis-data:/data
+    restart: unless-stopped
+
+  authentik-server:
+    container_name: relaychat-authentik-server-staging
+    image: ghcr.io/goauthentik/server:2026.2.1
+    command: server
+    environment:
+      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY}
+      AUTHENTIK_REDIS__HOST: authentik-redis
+      AUTHENTIK_REDIS__PORT: 6379
+      AUTHENTIK_REDIS__PASSWORD: ${AUTHENTIK_REDIS_PASSWORD}
+      AUTHENTIK_POSTGRESQL__HOST: authentik-postgresql
+      AUTHENTIK_POSTGRESQL__PORT: 5432
+      AUTHENTIK_POSTGRESQL__USER: ${AUTHENTIK_POSTGRES_USER}
+      AUTHENTIK_POSTGRESQL__NAME: ${AUTHENTIK_POSTGRES_DB}
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${AUTHENTIK_POSTGRES_PASSWORD}
+    depends_on:
+      authentik-postgresql:
+        condition: service_healthy
+      authentik-redis:
+        condition: service_healthy
+    ports:
+      - "27066:9000"
+    volumes:
+      - authentik-media:/media
+      - authentik-custom-templates:/templates
+    restart: unless-stopped
+
+  authentik-worker:
+    container_name: relaychat-authentik-worker-staging
+    image: ghcr.io/goauthentik/server:2026.2.1
+    command: worker
+    environment:
+      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY}
+      AUTHENTIK_REDIS__HOST: authentik-redis
+      AUTHENTIK_REDIS__PORT: 6379
+      AUTHENTIK_REDIS__PASSWORD: ${AUTHENTIK_REDIS_PASSWORD}
+      AUTHENTIK_POSTGRESQL__HOST: authentik-postgresql
+      AUTHENTIK_POSTGRESQL__PORT: 5432
+      AUTHENTIK_POSTGRESQL__USER: ${AUTHENTIK_POSTGRES_USER}
+      AUTHENTIK_POSTGRESQL__NAME: ${AUTHENTIK_POSTGRES_DB}
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${AUTHENTIK_POSTGRES_PASSWORD}
+    depends_on:
+      authentik-postgresql:
+        condition: service_healthy
+      authentik-redis:
+        condition: service_healthy
+    volumes:
+      - authentik-media:/media
+      - authentik-custom-templates:/templates
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+
 volumes:
   controlplane-postgres-data:
+  authentik-postgres-data:
+  authentik-redis-data:
+  authentik-media:
+  authentik-custom-templates:

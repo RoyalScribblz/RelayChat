@@ -16,13 +16,15 @@ var relayTokens = builder.Configuration.GetSection("RelayTokens").Get<NodeRelayT
     ?? throw new InvalidOperationException("Missing Relay token configuration.");
 var liveKit = builder.Configuration.GetSection("LiveKit").Get<LiveKitOptions>()
     ?? throw new InvalidOperationException("Missing LiveKit configuration.");
+var allowedCorsOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
+    ?? ["http://localhost:5000"];
 
 builder.Services.AddOpenApi();
 builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
     {
-        policy.WithOrigins("http://localhost:5000")
+        policy.WithOrigins(allowedCorsOrigins)
             .AllowAnyHeader()
             .AllowAnyMethod()
             .AllowCredentials();

@@ -5,6 +5,7 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Staging
       ConnectionStrings__NodeDatabase: Host=node-postgres;Port=5432;Database=${NODE_DB_NAME};Username=${NODE_DB_USER};Password=${NODE_DB_PASSWORD}
+      Cors__AllowedOrigins__0: ${CLIENT_ORIGIN}
       RelayTokens__Issuer: ${RELAY_TOKEN_ISSUER}
       RelayTokens__NodeAudience: ${RELAY_NODE_AUDIENCE}
       RelayTokens__SigningKey: ${RELAY_SIGNING_KEY}

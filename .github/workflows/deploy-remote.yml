@@ -2,14 +2,6 @@ name: Deploy Remote Environment
 
 on:
   workflow_dispatch:
-    inputs:
-      environment:
-        description: Deployment target
-        required: true
-        type: choice
-        options:
-          - staging
-          - production
 
 jobs:
   deploy:
@@ -23,23 +15,14 @@ jobs:
           install -m 700 -d ~/.ssh
           printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts
+          ssh-keyscan -H "95.216.4.72" >> ~/.ssh/known_hosts
 
-      - name: Deploy selected environment
-        env:
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
-          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
-          TARGET_ENV: ${{ inputs.environment }}
+      - name: Deploy staging
         run: |
-          ssh "${DEPLOY_USER}@${DEPLOY_HOST}" \
-            "export TARGET_ENV='${TARGET_ENV}' GHCR_USERNAME='${GHCR_USERNAME}' GHCR_TOKEN='${GHCR_TOKEN}'; bash -s" <<'EOF'
+          ssh "james@95.216.4.72" "bash -s" <<'EOF'
           set -euo pipefail
 
-          base_dir="$HOME/docker/relaychat/${TARGET_ENV}"
-
-          echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
+          base_dir="$HOME/docker/relaychat/staging"
 
           cd "$base_dir/client"
           docker compose -f docker-compose.yml pull relaychat-client
