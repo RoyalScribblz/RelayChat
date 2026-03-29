@@ -1,3 +1,5 @@
+import { RnnoiseWorkletNode, loadRnnoise } from "../vendor/web-noise-suppressor/index.js";
+
 let room = null;
 let dotNetRef = null;
 const attachedAudioElements = new Map();
@@ -9,7 +11,57 @@ let screenShareTracks = [];
 let isDeafened = false;
 let audioContext = null;
 let audioResumeHandlersRegistered = false;
+let rnnoiseWasmBinaryPromise = null;
+let rnnoiseWorkletModulePromise = null;
+let localMicrophoneStream = null;
+let localMicrophoneTrack = null;
+let localPublishedMicrophoneTrack = null;
+let localMicrophoneSourceNode = null;
+let localMicrophoneDestinationNode = null;
+let localMicrophoneMergerNode = null;
+let localMicrophoneSplitterNode = null;
+let localMicrophoneDownmixNode = null;
+let localMicrophoneDownmixGainLeft = null;
+let localMicrophoneDownmixGainRight = null;
+let localRnnoiseNode = null;
 const volumeStoragePrefix = "relaychat.voice.volume";
+const preferredMicrophoneProfiles = [
+    {
+        name: "rnnoise-preferred",
+        constraints: {
+            echoCancellation: true,
+            noiseSuppression: false,
+            autoGainControl: false,
+            channelCount: { ideal: 2 },
+            sampleRate: { ideal: 48000 },
+            sampleSize: { ideal: 16 },
+            latency: { ideal: 0.01 }
+        }
+    },
+    {
+        name: "rnnoise-compatible",
+        constraints: {
+            echoCancellation: true,
+            noiseSuppression: false,
+            autoGainControl: false,
+            channelCount: { ideal: 1 },
+            sampleRate: { ideal: 48000 },
+            latency: { ideal: 0.01 }
+        }
+    },
+    {
+        name: "speech-clean",
+        constraints: {
+            echoCancellation: true,
+            noiseSuppression: false,
+            autoGainControl: false
+        }
+    },
+    {
+        name: "browser-fallback",
+        constraints: true
+    }
+];
 const screenShareCaptureOptions = {
     audio: true,
     contentHint: "detail",
@@ -204,6 +256,214 @@ function ensureAudioResumeHandlers() {
     window.addEventListener("pointerdown", resume, { passive: true });
     window.addEventListener("keydown", resume, { passive: true });
     window.addEventListener("touchstart", resume, { passive: true });
+}
+
+async function getMicrophoneStream() {
+    let lastError = null;
+    for (const profile of preferredMicrophoneProfiles) {
+        try {
+            return await navigator.mediaDevices.getUserMedia({
+                audio: profile.constraints
+            });
+        } catch (error) {
+            lastError = error;
+        }
+    }
+
+    throw lastError ?? new Error("Unable to capture microphone audio.");
+}
+
+async function ensureRnnoiseResources(context) {
+    rnnoiseWasmBinaryPromise ??= loadRnnoise({
+        url: new URL("../vendor/web-noise-suppressor/rnnoise.wasm", import.meta.url).href,
+        simdUrl: new URL("../vendor/web-noise-suppressor/rnnoise_simd.wasm", import.meta.url).href
+    });
+    rnnoiseWorkletModulePromise ??= context.audioWorklet.addModule(
+        new URL("../vendor/web-noise-suppressor/rnnoise/workletProcessor.js", import.meta.url));
+
+    const [wasmBinary] = await Promise.all([
+        rnnoiseWasmBinaryPromise,
+        rnnoiseWorkletModulePromise
+    ]);
+    return wasmBinary;
+}
+
+function disconnectLocalMicrophoneNodes() {
+    try {
+        localMicrophoneSplitterNode?.disconnect();
+    } catch {
+        // Ignore disconnect failures during teardown.
+    }
+
+    try {
+        localMicrophoneSourceNode?.disconnect();
+    } catch {
+        // Ignore disconnect failures during teardown.
+    }
+
+    try {
+        localMicrophoneDownmixGainLeft?.disconnect();
+    } catch {
+        // Ignore disconnect failures during teardown.
+    }
+
+    try {
+        localMicrophoneDownmixGainRight?.disconnect();
+    } catch {
+        // Ignore disconnect failures during teardown.
+    }
+
+    try {
+        localMicrophoneDownmixNode?.disconnect();
+    } catch {
+        // Ignore disconnect failures during teardown.
+    }
+
+    try {
+        localRnnoiseNode?.disconnect();
+    } catch {
+        // Ignore disconnect failures during teardown.
+    }
+
+    try {
+        localMicrophoneMergerNode?.disconnect();
+    } catch {
+        // Ignore disconnect failures during teardown.
+    }
+
+    try {
+        localRnnoiseNode?.destroy?.();
+    } catch {
+        // Ignore processor teardown failures.
+    }
+
+    localMicrophoneSplitterNode = null;
+    localMicrophoneSourceNode = null;
+    localMicrophoneDownmixNode = null;
+    localMicrophoneDownmixGainLeft = null;
+    localMicrophoneDownmixGainRight = null;
+    localMicrophoneDestinationNode = null;
+    localMicrophoneMergerNode = null;
+    localRnnoiseNode = null;
+}
+
+async function stopLocalMicrophoneTrack(unpublish = true) {
+    if (room && localPublishedMicrophoneTrack && unpublish) {
+        try {
+            await room.localParticipant.unpublishTrack(localPublishedMicrophoneTrack, true);
+        } catch {
+            // Ignore unpublish failures during teardown.
+        }
+    }
+
+    try {
+        localPublishedMicrophoneTrack?.stop();
+    } catch {
+        // Ignore local track stop failures.
+    }
+
+    disconnectLocalMicrophoneNodes();
+
+    if (localMicrophoneStream) {
+        for (const track of localMicrophoneStream.getTracks()) {
+            try {
+                track.stop();
+            } catch {
+                // Ignore stream track stop failures.
+            }
+        }
+    }
+
+    localMicrophoneStream = null;
+    localMicrophoneTrack = null;
+    localPublishedMicrophoneTrack = null;
+}
+
+async function createProcessedMicrophoneTrack() {
+    localMicrophoneStream = await getMicrophoneStream();
+
+    const [rawTrack] = localMicrophoneStream.getAudioTracks();
+    if (!rawTrack) {
+        throw new Error("The browser did not return a microphone track.");
+    }
+
+    rawTrack.contentHint = "speech";
+
+    const context = ensureAudioContext();
+    if (!context || !context.audioWorklet) {
+        localMicrophoneTrack = rawTrack;
+        const fallbackTrack = new window.LivekitClient.LocalAudioTrack(rawTrack, undefined, true);
+        fallbackTrack.mediaStreamTrack.contentHint = "speech";
+        return fallbackTrack;
+    }
+
+    try {
+        ensureAudioResumeHandlers();
+        const wasmBinary = await ensureRnnoiseResources(context);
+        await context.resume().catch(() => { });
+
+        localMicrophoneSourceNode = context.createMediaStreamSource(localMicrophoneStream);
+        localMicrophoneSplitterNode = context.createChannelSplitter(2);
+        localMicrophoneDownmixNode = context.createChannelMerger(1);
+        localMicrophoneDownmixGainLeft = context.createGain();
+        localMicrophoneDownmixGainRight = context.createGain();
+        localMicrophoneDownmixGainLeft.gain.value = 0.5;
+        localMicrophoneDownmixGainRight.gain.value = 0.5;
+        localRnnoiseNode = new RnnoiseWorkletNode(context, {
+            wasmBinary,
+            maxChannels: 1
+        });
+        localMicrophoneMergerNode = context.createChannelMerger(2);
+        localMicrophoneDestinationNode = context.createMediaStreamDestination();
+
+        localMicrophoneSourceNode.connect(localMicrophoneSplitterNode);
+        localMicrophoneSplitterNode.connect(localMicrophoneDownmixGainLeft, 0);
+        localMicrophoneSplitterNode.connect(localMicrophoneDownmixGainRight, 1);
+        localMicrophoneDownmixGainLeft.connect(localMicrophoneDownmixNode, 0, 0);
+        localMicrophoneDownmixGainRight.connect(localMicrophoneDownmixNode, 0, 0);
+        localMicrophoneDownmixNode.connect(localRnnoiseNode);
+        localRnnoiseNode.connect(localMicrophoneMergerNode, 0, 0);
+        localRnnoiseNode.connect(localMicrophoneMergerNode, 0, 1);
+        localMicrophoneMergerNode.connect(localMicrophoneDestinationNode);
+
+        const [processedTrack] = localMicrophoneDestinationNode.stream.getAudioTracks();
+        if (!processedTrack) {
+            throw new Error("RNNoise did not produce a processed microphone track.");
+        }
+
+        processedTrack.contentHint = "speech";
+        localMicrophoneTrack = processedTrack;
+        const processedLocalTrack = new window.LivekitClient.LocalAudioTrack(processedTrack, undefined, true);
+        processedLocalTrack.mediaStreamTrack.contentHint = "speech";
+        return processedLocalTrack;
+    } catch {
+        disconnectLocalMicrophoneNodes();
+        localMicrophoneTrack = rawTrack;
+        const fallbackTrack = new window.LivekitClient.LocalAudioTrack(rawTrack, undefined, true);
+        fallbackTrack.mediaStreamTrack.contentHint = "speech";
+        return fallbackTrack;
+    }
+}
+
+async function ensurePublishedMicrophoneTrack() {
+    if (!room) {
+        return;
+    }
+
+    if (localPublishedMicrophoneTrack) {
+        return;
+    }
+
+    try {
+        const localTrack = await createProcessedMicrophoneTrack();
+        await room.localParticipant.publishTrack(localTrack, {
+            source: window.LivekitClient.Track.Source.Microphone
+        });
+        localPublishedMicrophoneTrack = localTrack;
+    } catch (error) {
+        await stopLocalMicrophoneTrack(false);
+        throw error;
+    }
 }
 
 function attachRemoteAudioTrack(track, publication, participant) {
@@ -522,8 +782,21 @@ export async function joinVoiceChannel(serverUrl, token, dotNetObjectReference) 
         setActiveSpeakerIdentities(participants.map(participant => participant.identity));
     });
 
-    await room.connect(serverUrl, token);
-    await room.localParticipant.setMicrophoneEnabled(true);
+    try {
+        await room.connect(serverUrl, token);
+        await ensurePublishedMicrophoneTrack();
+    } catch (error) {
+        const failedRoom = room;
+        room = null;
+        await stopLocalMicrophoneTrack(false);
+        try {
+            await failedRoom?.disconnect();
+        } catch {
+            // Ignore disconnect failures after a failed join.
+        }
+
+        throw error;
+    }
 
     for (const participant of room.remoteParticipants.values()) {
         for (const publication of participant.trackPublications.values()) {
@@ -548,6 +821,7 @@ export async function leaveVoiceChannel() {
     room = null;
 
     if (!currentRoom) {
+        await stopLocalMicrophoneTrack(false);
         detachAllRemoteAudioTracks();
         clearVideoPublications();
         voiceParticipants.clear();
@@ -565,6 +839,8 @@ export async function leaveVoiceChannel() {
     } catch {
         // Ignore teardown failures during user-initiated leave.
     }
+
+    await stopLocalMicrophoneTrack(false);
 
     try {
         await currentRoom.disconnect();
@@ -591,11 +867,16 @@ export function setVoiceParticipants(participants) {
 }
 
 export async function setVoiceMuted(isMuted) {
-    if (!room) {
+    if (!room || !localPublishedMicrophoneTrack) {
         return;
     }
 
-    await room.localParticipant.setMicrophoneEnabled(!isMuted);
+    if (isMuted) {
+        await localPublishedMicrophoneTrack.mute();
+        return;
+    }
+
+    await localPublishedMicrophoneTrack.unmute();
 }
 
 export function setVoiceDeafened(deafened) {
