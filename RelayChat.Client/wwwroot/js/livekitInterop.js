@@ -65,7 +65,6 @@ const preferredMicrophoneProfiles = [
 const screenShareCaptureOptions = {
     audio: true,
     contentHint: "detail",
-    preferCurrentTab: true,
     surfaceSwitching: "include",
     systemAudio: "include",
     video: {
@@ -970,9 +969,31 @@ export async function setScreenShareEnabled(isEnabled) {
     let fellBackToVideoOnly = false;
     try {
         tracks = await room.localParticipant.createScreenTracks(buildScreenShareCaptureOptions(true));
-    } catch {
+    } catch (error) {
+        const errorName = error?.name ?? "";
+        if (errorName === "AbortError" || errorName === "NotAllowedError") {
+            return {
+                started: false,
+                audioIncluded: false,
+                fellBackToVideoOnly: false
+            };
+        }
+
         fellBackToVideoOnly = true;
-        tracks = await room.localParticipant.createScreenTracks(buildScreenShareCaptureOptions(false));
+        try {
+            tracks = await room.localParticipant.createScreenTracks(buildScreenShareCaptureOptions(false));
+        } catch (fallbackError) {
+            const fallbackErrorName = fallbackError?.name ?? "";
+            if (fallbackErrorName === "AbortError" || fallbackErrorName === "NotAllowedError") {
+                return {
+                    started: false,
+                    audioIncluded: false,
+                    fellBackToVideoOnly: false
+                };
+            }
+
+            throw fallbackError;
+        }
     }
 
     for (const track of tracks) {

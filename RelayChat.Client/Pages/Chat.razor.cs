@@ -382,7 +382,26 @@ public partial class Chat : ComponentBase, IAsyncDisposable
     protected async Task ToggleScreenShare()
     {
         var newScreenShareState = !VoiceClient.IsScreenShareEnabled;
-        var result = await VoiceClient.SetScreenShareEnabled(newScreenShareState);
+        ScreenShareResult result;
+        try
+        {
+            result = await VoiceClient.SetScreenShareEnabled(newScreenShareState);
+        }
+        catch (JSException ex) when (ex.Message.Contains("AbortError", StringComparison.OrdinalIgnoreCase) ||
+                                     ex.Message.Contains("NotAllowedError", StringComparison.OrdinalIgnoreCase))
+        {
+            Snackbar.Add("Screenshare cancelled.", Severity.Info);
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        if (!result.Started && newScreenShareState)
+        {
+            Snackbar.Add("Screenshare cancelled.", Severity.Info);
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
         if (result.FellBackToVideoOnly)
         {
             Snackbar.Add(
