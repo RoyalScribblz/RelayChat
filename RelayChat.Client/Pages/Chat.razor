@@ -285,7 +285,200 @@
             </div>
 
             <div class="relay-voice-stage">
-                <div id="livekit-video-grid" class="relay-voice-grid"></div>
+                @if (_voiceTiles.Count == 0)
+                {
+                    <div class="relay-empty-messages">
+                        <p>Nobody is connected yet.</p>
+                    </div>
+                }
+                else if (_focusedVoiceTile is not null)
+                {
+                    <div class="relay-voice-layout relay-voice-layout--focused">
+                        <div class="relay-voice-focus-area">
+                            <div class="relay-voice-tile relay-voice-tile--focused @(_focusedVoiceTile.Kind == VoiceTileKind.Screen ? "relay-voice-tile--screen" : string.Empty) @(ShowVoiceTileSpeaking(_focusedVoiceTile) ? "relay-voice-tile--speaking" : string.Empty)"
+                                 @onclick="@(() => ToggleVoiceTileFocus(_focusedVoiceTile))"
+                                 @oncontextmenu:preventDefault="@(!_focusedVoiceTile.IsCurrentUser)"
+                                 @oncontextmenu="@(args => _focusedVoiceTile.IsCurrentUser ? Task.CompletedTask : OpenVoiceTileVolumeMenu(args, _focusedVoiceTile))">
+                                <div class="relay-voice-tile__media">
+                                    @if (_focusedVoiceTile.HasVideo)
+                                    {
+                                        <div id="@GetVoiceTileVideoElementId(_focusedVoiceTile)" class="relay-voice-tile__video-host"></div>
+                                    }
+                                    else
+                                    {
+                                        <div class="relay-voice-tile__placeholder">
+                                            @if (!string.IsNullOrWhiteSpace(_focusedVoiceTile.AvatarUrl))
+                                            {
+                                                <img src="@_focusedVoiceTile.AvatarUrl" alt="@_focusedVoiceTile.DisplayName" />
+                                            }
+                                            else
+                                            {
+                                                <span>@GetVoiceTileInitial(_focusedVoiceTile)</span>
+                                            }
+                                        </div>
+                                    }
+                                </div>
+
+                                <div class="relay-voice-tile__footer">
+                                    <div class="relay-voice-tile__name">@GetVoiceTileTitle(_focusedVoiceTile)</div>
+                                    <div class="relay-voice-tile__badges">
+                                        @if (_focusedVoiceTile.Kind == VoiceTileKind.Screen)
+                                        {
+                                            <span class="relay-voice-badge relay-voice-badge--screen">
+                                                <MudIcon Icon="@Icons.Material.Rounded.ScreenShare" Size="Size.Small" />
+                                            </span>
+                                        }
+                                        @if (ShowVoiceTileMute(_focusedVoiceTile))
+                                        {
+                                            <span class="relay-voice-badge relay-voice-badge--mute">
+                                                <MudIcon Icon="@Icons.Material.Rounded.MicOff" Size="Size.Small" />
+                                            </span>
+                                        }
+                                        @if (ShowVoiceTileDeafen(_focusedVoiceTile))
+                                        {
+                                            <span class="relay-voice-badge relay-voice-badge--deafen">
+                                                <MudIcon Icon="@Icons.Material.Rounded.HeadsetOff" Size="Size.Small" />
+                                            </span>
+                                        }
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        @if (_secondaryVoiceTiles.Count > 0 && !_areSecondaryVoiceTilesCollapsed)
+                        {
+                            <div class="relay-voice-secondary-panel">
+                                <button type="button"
+                                    class="relay-voice-secondary-toggle"
+                                    @onclick="@(() => SetSecondaryVoiceTilesCollapsed(true))">
+                                    <MudIcon Icon="@Icons.Material.Rounded.KeyboardArrowDown" Size="Size.Small" />
+                                    <MudIcon Icon="@Icons.Material.Rounded.Groups" Size="Size.Small" />
+                                </button>
+
+                                <div class="relay-voice-secondary-strip">
+                                    @foreach (var tile in _secondaryVoiceTiles)
+                                    {
+                                        <div class="relay-voice-tile relay-voice-tile--compact @(tile.Kind == VoiceTileKind.Screen ? "relay-voice-tile--screen" : string.Empty) @(ShowVoiceTileSpeaking(tile) ? "relay-voice-tile--speaking" : string.Empty)"
+                                             @onclick="@(() => ToggleVoiceTileFocus(tile))"
+                                             @oncontextmenu:preventDefault="@(!tile.IsCurrentUser)"
+                                             @oncontextmenu="@(args => tile.IsCurrentUser ? Task.CompletedTask : OpenVoiceTileVolumeMenu(args, tile))">
+                                            <div class="relay-voice-tile__media">
+                                                @if (tile.HasVideo)
+                                                {
+                                                    <div id="@GetVoiceTileVideoElementId(tile)" class="relay-voice-tile__video-host"></div>
+                                                }
+                                                else
+                                                {
+                                                    <div class="relay-voice-tile__placeholder relay-voice-tile__placeholder--compact">
+                                                        @if (!string.IsNullOrWhiteSpace(tile.AvatarUrl))
+                                                        {
+                                                            <img src="@tile.AvatarUrl" alt="@tile.DisplayName" />
+                                                        }
+                                                        else
+                                                        {
+                                                            <span>@GetVoiceTileInitial(tile)</span>
+                                                        }
+                                                    </div>
+                                                }
+                                            </div>
+
+                                            <div class="relay-voice-tile__footer">
+                                                <div class="relay-voice-tile__name">@GetVoiceTileTitle(tile)</div>
+                                                <div class="relay-voice-tile__badges">
+                                                    @if (tile.Kind == VoiceTileKind.Screen)
+                                                    {
+                                                        <span class="relay-voice-badge relay-voice-badge--screen">
+                                                            <MudIcon Icon="@Icons.Material.Rounded.ScreenShare" Size="Size.Small" />
+                                                        </span>
+                                                    }
+                                                    @if (ShowVoiceTileMute(tile))
+                                                    {
+                                                        <span class="relay-voice-badge relay-voice-badge--mute">
+                                                            <MudIcon Icon="@Icons.Material.Rounded.MicOff" Size="Size.Small" />
+                                                        </span>
+                                                    }
+                                                    @if (ShowVoiceTileDeafen(tile))
+                                                    {
+                                                        <span class="relay-voice-badge relay-voice-badge--deafen">
+                                                            <MudIcon Icon="@Icons.Material.Rounded.HeadsetOff" Size="Size.Small" />
+                                                        </span>
+                                                    }
+                                                </div>
+                                            </div>
+                                        </div>
+                                    }
+                                </div>
+                            </div>
+                        }
+                        else if (_secondaryVoiceTiles.Count > 0)
+                        {
+                            <div class="relay-voice-secondary-panel relay-voice-secondary-panel--collapsed">
+                                <button type="button"
+                                        class="relay-voice-secondary-toggle"
+                                        @onclick="@(() => SetSecondaryVoiceTilesCollapsed(false))">
+                                    <MudIcon Icon="@Icons.Material.Rounded.KeyboardArrowUp" Size="Size.Small" />
+                                    <MudIcon Icon="@Icons.Material.Rounded.Groups" Size="Size.Small" />
+                                </button>
+                            </div>
+                        }
+                    </div>
+                }
+                else
+                {
+                    <div class="relay-voice-grid @(_voiceTiles.Count == 1 ? "relay-voice-grid--single" : string.Empty)">
+                        @foreach (var tile in _voiceTiles)
+                        {
+                            <div class="relay-voice-tile @(tile.Kind == VoiceTileKind.Screen ? "relay-voice-tile--screen" : string.Empty) @(ShowVoiceTileSpeaking(tile) ? "relay-voice-tile--speaking" : string.Empty)"
+                                 @onclick="@(() => ToggleVoiceTileFocus(tile))"
+                                 @oncontextmenu:preventDefault="@(!tile.IsCurrentUser)"
+                                 @oncontextmenu="@(args => tile.IsCurrentUser ? Task.CompletedTask : OpenVoiceTileVolumeMenu(args, tile))">
+                                <div class="relay-voice-tile__media">
+                                    @if (tile.HasVideo)
+                                    {
+                                        <div id="@GetVoiceTileVideoElementId(tile)" class="relay-voice-tile__video-host"></div>
+                                    }
+                                    else
+                                    {
+                                        <div class="relay-voice-tile__placeholder">
+                                            @if (!string.IsNullOrWhiteSpace(tile.AvatarUrl))
+                                            {
+                                                <img src="@tile.AvatarUrl" alt="@tile.DisplayName" />
+                                            }
+                                            else
+                                            {
+                                                <span>@GetVoiceTileInitial(tile)</span>
+                                            }
+                                        </div>
+                                    }
+                                </div>
+
+                                <div class="relay-voice-tile__footer">
+                                    <div class="relay-voice-tile__name">@GetVoiceTileTitle(tile)</div>
+                                    <div class="relay-voice-tile__badges">
+                                        @if (tile.Kind == VoiceTileKind.Screen)
+                                        {
+                                            <span class="relay-voice-badge relay-voice-badge--screen">
+                                                <MudIcon Icon="@Icons.Material.Rounded.ScreenShare" Size="Size.Small" />
+                                            </span>
+                                        }
+                                        @if (ShowVoiceTileMute(tile))
+                                        {
+                                            <span class="relay-voice-badge relay-voice-badge--mute">
+                                                <MudIcon Icon="@Icons.Material.Rounded.MicOff" Size="Size.Small" />
+                                            </span>
+                                        }
+                                        @if (ShowVoiceTileDeafen(tile))
+                                        {
+                                            <span class="relay-voice-badge relay-voice-badge--deafen">
+                                                <MudIcon Icon="@Icons.Material.Rounded.HeadsetOff" Size="Size.Small" />
+                                            </span>
+                                        }
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
             </div>
 
             <div class="relay-voice-controls-panel">

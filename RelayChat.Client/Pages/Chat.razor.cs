@@ -17,6 +17,7 @@ public partial class Chat : ComponentBase, IAsyncDisposable
     private readonly List<MembershipDto> members = [];
     private readonly List<VoiceParticipantDto> voiceParticipants = [];
     private readonly Dictionary<Guid, List<VoiceParticipantDto>> voiceParticipantsByChannel = [];
+    private readonly List<VideoPublicationState> videoPublications = [];
     private string messageText = string.Empty;
     private string editText = string.Empty;
     private string newChannelName = string.Empty;
@@ -45,6 +46,8 @@ public partial class Chat : ComponentBase, IAsyncDisposable
     private string voiceVolumeTargetSource = "voice";
     private int voiceVolumePercent = 100;
     private HashSet<Guid> activeSpeakerIds = [];
+    private string? focusedVoiceTileKey;
+    private bool areSecondaryVoiceTilesCollapsed;
 
     [Parameter]
     public Guid? ChannelId { get; set; }
@@ -98,6 +101,10 @@ public partial class Chat : ComponentBase, IAsyncDisposable
     protected IReadOnlyList<ChannelDto> _channels => channels;
     protected IReadOnlyList<MembershipDto> _members => members;
     protected IReadOnlyList<VoiceParticipantDto> _voiceParticipants => voiceParticipants;
+    protected IReadOnlyList<VoiceTileViewModel> _voiceTiles => BuildVoiceTiles();
+    protected VoiceTileViewModel? _focusedVoiceTile => GetFocusedVoiceTile(_voiceTiles);
+    protected IReadOnlyList<VoiceTileViewModel> _secondaryVoiceTiles => GetSecondaryVoiceTiles(_voiceTiles, _focusedVoiceTile);
+    protected bool _areSecondaryVoiceTilesCollapsed => areSecondaryVoiceTilesCollapsed;
     protected ChannelDto? ActiveVoiceChannel => VoiceClient.ActiveChannelId.HasValue
         ? channels.FirstOrDefault(channel => channel.Id == VoiceClient.ActiveChannelId.Value)
         : null;
@@ -161,6 +168,7 @@ public partial class Chat : ComponentBase, IAsyncDisposable
         ChatClient.VoiceChannelStateReceived += OnVoiceChannelStateReceived;
         ChatClient.Reconnected += OnReconnected;
         VoiceClient.ActiveSpeakersChanged += OnActiveSpeakersChanged;
+        VoiceClient.VideoPublicationsChanged += OnVideoPublicationsChanged;
     }
 
     protected override async Task OnParametersSetAsync()
@@ -229,10 +237,7 @@ public partial class Chat : ComponentBase, IAsyncDisposable
             await UnregisterComposer();
         }
 
-        if (_isVoiceChannel && VoiceClient.IsConnected)
-        {
-            await VoiceClient.RefreshGrid();
-        }
+        await SyncRenderedVoiceTiles();
 
         if (shouldScrollMessages && chatModule is not null)
         {
@@ -358,7 +363,19 @@ public partial class Chat : ComponentBase, IAsyncDisposable
     protected async Task ToggleCamera()
     {
         var newCameraState = !VoiceClient.IsCameraEnabled;
-        await VoiceClient.SetCameraEnabled(newCameraState);
+        try
+        {
+            await VoiceClient.SetCameraEnabled(newCameraState);
+        }
+        catch (JSException ex)
+        {
+            Snackbar.Add(
+                string.IsNullOrWhiteSpace(ex.Message)
+                    ? "Camera access was denied or is unavailable."
+                    : $"Camera could not be enabled: {ex.Message}",
+                Severity.Warning);
+        }
+
         await InvokeAsync(StateHasChanged);
     }
 
@@ -398,6 +415,32 @@ public partial class Chat : ComponentBase, IAsyncDisposable
             "voice",
             args.ClientX,
             args.ClientY);
+    }
+
+    protected async Task OpenVoiceTileVolumeMenu(MouseEventArgs args, VoiceTileViewModel tile)
+    {
+        if (tile.IsCurrentUser)
+        {
+            return;
+        }
+
+        await OpenVoiceVolumeMenu(
+            tile.UserId,
+            tile.DisplayName,
+            tile.AudioSource,
+            args.ClientX,
+            args.ClientY);
+    }
+
+    protected void ToggleVoiceTileFocus(VoiceTileViewModel tile)
+    {
+        focusedVoiceTileKey = focusedVoiceTileKey == tile.Key ? null : tile.Key;
+        areSecondaryVoiceTilesCollapsed = false;
+    }
+
+    protected void SetSecondaryVoiceTilesCollapsed(bool collapsed)
+    {
+        areSecondaryVoiceTilesCollapsed = collapsed;
     }
 
     protected void CloseVoiceVolumeMenu()
@@ -684,19 +727,6 @@ public partial class Chat : ComponentBase, IAsyncDisposable
         return SendMessage();
     }
 
-    [JSInvokable]
-    public Task HandleVoiceVolumeContextMenu(string identity, string source, double clientX, double clientY)
-    {
-        if (!Guid.TryParse(identity, out var userId))
-        {
-            return Task.CompletedTask;
-        }
-
-        var participant = voiceParticipants.FirstOrDefault(current => current.UserId == userId);
-        var name = participant?.Name ?? identity;
-        return OpenVoiceVolumeMenu(userId, name, source, clientX, clientY);
-    }
-
     public async ValueTask DisposeAsync()
     {
         ChatClient.MessageReceived -= OnMessageReceived;
@@ -705,6 +735,7 @@ public partial class Chat : ComponentBase, IAsyncDisposable
         ChatClient.VoiceChannelStateReceived -= OnVoiceChannelStateReceived;
         ChatClient.Reconnected -= OnReconnected;
         VoiceClient.ActiveSpeakersChanged -= OnActiveSpeakersChanged;
+        VoiceClient.VideoPublicationsChanged -= OnVideoPublicationsChanged;
 
         await LeaveVoiceChannel();
         await UnregisterComposer();
@@ -864,6 +895,9 @@ public partial class Chat : ComponentBase, IAsyncDisposable
             voiceParticipants.Clear();
             voiceParticipantsByChannel.Clear();
             activeSpeakerIds.Clear();
+            videoPublications.Clear();
+            focusedVoiceTileKey = null;
+            areSecondaryVoiceTilesCollapsed = false;
             return;
         }
 
@@ -872,6 +906,9 @@ public partial class Chat : ComponentBase, IAsyncDisposable
         voiceParticipants.Clear();
         voiceParticipantsByChannel.Clear();
         activeSpeakerIds.Clear();
+        videoPublications.Clear();
+        focusedVoiceTileKey = null;
+        areSecondaryVoiceTilesCollapsed = false;
     }
 
     private async Task RegisterComposer()
@@ -1000,6 +1037,13 @@ public partial class Chat : ComponentBase, IAsyncDisposable
     private void OnActiveSpeakersChanged(IReadOnlySet<Guid> speakerIds)
     {
         activeSpeakerIds = speakerIds.ToHashSet();
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private void OnVideoPublicationsChanged(IReadOnlyList<VideoPublicationState> publications)
+    {
+        videoPublications.Clear();
+        videoPublications.AddRange(publications);
         _ = InvokeAsync(StateHasChanged);
     }
 
@@ -1214,6 +1258,28 @@ public partial class Chat : ComponentBase, IAsyncDisposable
         await InvokeAsync(StateHasChanged);
     }
 
+    private async Task SyncRenderedVoiceTiles()
+    {
+        if (!VoiceClient.IsConnected)
+        {
+            await VoiceClient.SyncVideoElements([]);
+            return;
+        }
+
+        if (!_isVoiceChannel)
+        {
+            await VoiceClient.SyncVideoElements([]);
+            return;
+        }
+
+        var slots = GetRenderedVoiceTiles()
+            .Where(tile => tile.HasVideo)
+            .Select(tile => new VideoRenderSlot(tile.Identity, tile.VideoSource, GetVoiceTileVideoElementId(tile)))
+            .ToList();
+
+        await VoiceClient.SyncVideoElements(slots);
+    }
+
     private Guid? GetLastConfirmedMessageId()
     {
         return messages
@@ -1222,6 +1288,166 @@ public partial class Chat : ComponentBase, IAsyncDisposable
             .ThenByDescending(message => message.Message.Id)
             .Select(message => (Guid?)message.Message.Id)
             .FirstOrDefault();
+    }
+
+    private List<VoiceTileViewModel> BuildVoiceTiles()
+    {
+        if (!VoiceClient.ActiveChannelId.HasValue)
+        {
+            focusedVoiceTileKey = null;
+            areSecondaryVoiceTilesCollapsed = false;
+            return [];
+        }
+
+        var tiles = new List<VoiceTileViewModel>();
+        foreach (var participant in voiceParticipants)
+        {
+            var cameraPublication = videoPublications.FirstOrDefault(publication =>
+                publication.UserId == participant.UserId &&
+                publication.Source == "camera" &&
+                !publication.IsMuted);
+
+            tiles.Add(new VoiceTileViewModel(
+                Key: $"{participant.UserId}:user",
+                UserId: participant.UserId,
+                Identity: participant.UserId.ToString(),
+                DisplayName: participant.Name,
+                Handle: participant.Handle,
+                AvatarUrl: participant.AvatarUrl,
+                Kind: VoiceTileKind.User,
+                AudioSource: "voice",
+                VideoSource: "camera",
+                HasVideo: cameraPublication is not null,
+                IsMuted: participant.IsMuted,
+                IsDeafened: participant.IsDeafened,
+                IsSpeaking: activeSpeakerIds.Contains(participant.UserId),
+                IsCurrentUser: IsCurrentUser(participant.UserId)));
+        }
+
+        foreach (var screenPublication in videoPublications
+                     .Where(publication => publication.Source == "screen" && !publication.IsMuted)
+                     .OrderBy(publication => GetVoiceParticipantIndex(publication.UserId)))
+        {
+            var participant = GetVoiceParticipant(screenPublication.UserId);
+            var name = participant?.Name
+                       ?? members.FirstOrDefault(member => member.UserId == screenPublication.UserId)?.Name
+                       ?? screenPublication.UserId.ToString();
+            var handle = participant?.Handle
+                         ?? members.FirstOrDefault(member => member.UserId == screenPublication.UserId)?.Handle
+                         ?? string.Empty;
+            var avatarUrl = participant?.AvatarUrl
+                            ?? members.FirstOrDefault(member => member.UserId == screenPublication.UserId)?.AvatarUrl;
+
+            tiles.Add(new VoiceTileViewModel(
+                Key: $"{screenPublication.UserId}:screen",
+                UserId: screenPublication.UserId,
+                Identity: screenPublication.UserId.ToString(),
+                DisplayName: name,
+                Handle: handle,
+                AvatarUrl: avatarUrl,
+                Kind: VoiceTileKind.Screen,
+                AudioSource: "screen",
+                VideoSource: "screen",
+                HasVideo: true,
+                IsMuted: false,
+                IsDeafened: false,
+                IsSpeaking: false,
+                IsCurrentUser: IsCurrentUser(screenPublication.UserId)));
+        }
+
+        if (focusedVoiceTileKey is not null && tiles.All(tile => tile.Key != focusedVoiceTileKey))
+        {
+            focusedVoiceTileKey = null;
+            areSecondaryVoiceTilesCollapsed = false;
+        }
+
+        if (tiles.Count <= 1)
+        {
+            areSecondaryVoiceTilesCollapsed = false;
+        }
+
+        return tiles;
+    }
+
+    private VoiceTileViewModel? GetFocusedVoiceTile(IReadOnlyList<VoiceTileViewModel> tiles)
+    {
+        if (focusedVoiceTileKey is null)
+        {
+            return null;
+        }
+
+        return tiles.FirstOrDefault(tile => tile.Key == focusedVoiceTileKey);
+    }
+
+    private IReadOnlyList<VoiceTileViewModel> GetSecondaryVoiceTiles(
+        IReadOnlyList<VoiceTileViewModel> tiles,
+        VoiceTileViewModel? focusedTile)
+    {
+        if (focusedTile is null)
+        {
+            return [];
+        }
+
+        return tiles.Where(tile => tile.Key != focusedTile.Key).ToList();
+    }
+
+    private IReadOnlyList<VoiceTileViewModel> GetRenderedVoiceTiles()
+    {
+        var tiles = _voiceTiles;
+        var focusedTile = _focusedVoiceTile;
+        if (focusedTile is null)
+        {
+            return tiles;
+        }
+
+        if (areSecondaryVoiceTilesCollapsed)
+        {
+            return [focusedTile];
+        }
+
+        return [focusedTile, .._secondaryVoiceTiles];
+    }
+
+    private VoiceParticipantDto? GetVoiceParticipant(Guid userId)
+    {
+        return voiceParticipants.FirstOrDefault(participant => participant.UserId == userId);
+    }
+
+    private int GetVoiceParticipantIndex(Guid userId)
+    {
+        var index = voiceParticipants.FindIndex(participant => participant.UserId == userId);
+        return index >= 0 ? index : int.MaxValue;
+    }
+
+    private string GetVoiceTileVideoElementId(VoiceTileViewModel tile)
+    {
+        return $"relay-voice-video-{tile.UserId:N}-{tile.VideoSource}";
+    }
+
+    protected string GetVoiceTileInitial(VoiceTileViewModel tile)
+    {
+        var value = string.IsNullOrWhiteSpace(tile.DisplayName) ? tile.Handle : tile.DisplayName;
+        return string.IsNullOrWhiteSpace(value) ? "?" : value[..1].ToUpperInvariant();
+    }
+
+    protected string GetVoiceTileTitle(VoiceTileViewModel tile)
+    {
+        return tile.Kind == VoiceTileKind.Screen ? $"{tile.DisplayName}'s screen" : tile.DisplayName;
+    }
+
+    protected bool ShowVoiceTileSpeaking(VoiceTileViewModel tile)
+    {
+        return tile.Kind == VoiceTileKind.User && tile.IsSpeaking;
+    }
+
+    protected bool ShowVoiceTileMute(VoiceTileViewModel tile)
+    {
+        return tile.Kind == VoiceTileKind.User && tile.IsMuted;
+    }
+
+    protected bool ShowVoiceTileDeafen(VoiceTileViewModel tile)
+    {
+        return tile.Kind == VoiceTileKind.User && tile.IsDeafened;
     }
 
     private IReadOnlyList<ChatDayGroup> BuildChatDays()
@@ -1347,4 +1573,26 @@ public partial class Chat : ComponentBase, IAsyncDisposable
         public DateTimeOffset StartedAt { get; } = startedAt;
         public List<ChatMessage> Messages { get; } = [];
     }
+
+    protected enum VoiceTileKind
+    {
+        User,
+        Screen
+    }
+
+    protected sealed record VoiceTileViewModel(
+        string Key,
+        Guid UserId,
+        string Identity,
+        string DisplayName,
+        string Handle,
+        string? AvatarUrl,
+        VoiceTileKind Kind,
+        string AudioSource,
+        string VideoSource,
+        bool HasVideo,
+        bool IsMuted,
+        bool IsDeafened,
+        bool IsSpeaking,
+        bool IsCurrentUser);
 }

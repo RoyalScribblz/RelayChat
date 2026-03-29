@@ -4,6 +4,8 @@ using RelayChat.Node.Contracts;
 namespace RelayChat.Client.Services;
 
 public sealed record ScreenShareResult(bool Started, bool AudioIncluded, bool FellBackToVideoOnly);
+public sealed record VideoPublicationState(Guid UserId, string Source, bool IsMuted, bool IsLocal);
+public sealed record VideoRenderSlot(string Identity, string Source, string ElementId);
 
 public sealed class VoiceClient(IJSRuntime jsRuntime) : IAsyncDisposable
 {
@@ -17,7 +19,7 @@ public sealed class VoiceClient(IJSRuntime jsRuntime) : IAsyncDisposable
     public bool IsScreenShareEnabled { get; private set; }
     public bool IsConnected => ActiveChannelId.HasValue;
     public event Action<IReadOnlySet<Guid>>? ActiveSpeakersChanged;
-    public event Action<IReadOnlySet<Guid>>? VideoParticipantsChanged;
+    public event Action<IReadOnlyList<VideoPublicationState>>? VideoPublicationsChanged;
 
     public async Task Join(Guid channelId, VoiceChannelAccessDto access)
     {
@@ -48,7 +50,7 @@ public sealed class VoiceClient(IJSRuntime jsRuntime) : IAsyncDisposable
         IsCameraEnabled = false;
         IsScreenShareEnabled = false;
         ActiveSpeakersChanged?.Invoke(new HashSet<Guid>());
-        VideoParticipantsChanged?.Invoke(new HashSet<Guid>());
+        VideoPublicationsChanged?.Invoke([]);
     }
 
     public async Task SetMuted(bool isMuted)
@@ -126,14 +128,14 @@ public sealed class VoiceClient(IJSRuntime jsRuntime) : IAsyncDisposable
         await module.InvokeVoidAsync("setParticipantVolume", userId.ToString(), source, volumePercent);
     }
 
-    public async Task RefreshGrid()
+    public async Task SyncVideoElements(IReadOnlyList<VideoRenderSlot> slots)
     {
         if (module is null)
         {
             return;
         }
 
-        await module.InvokeVoidAsync("refreshVoiceGrid");
+        await module.InvokeVoidAsync("syncVideoElements", slots);
     }
 
     [JSInvokable]
@@ -148,14 +150,25 @@ public sealed class VoiceClient(IJSRuntime jsRuntime) : IAsyncDisposable
     }
 
     [JSInvokable]
-    public Task HandleVideoParticipantsChanged(string[] identities)
+    public Task HandleVideoPublicationsChanged(List<VideoPublicationStateDto> publications)
     {
-        var videoParticipants = identities
-            .Select(identity => Guid.TryParse(identity, out var userId) ? userId : Guid.Empty)
-            .Where(userId => userId != Guid.Empty)
-            .ToHashSet();
-        VideoParticipantsChanged?.Invoke(videoParticipants);
+        var parsedPublications = publications
+            .Select(publication => Guid.TryParse(publication.Identity, out var userId)
+                ? new VideoPublicationState(userId, publication.Source, publication.IsMuted, publication.IsLocal)
+                : null)
+            .Where(publication => publication is not null)
+            .Cast<VideoPublicationState>()
+            .ToList();
+        VideoPublicationsChanged?.Invoke(parsedPublications);
         return Task.CompletedTask;
+    }
+
+    public sealed class VideoPublicationStateDto
+    {
+        public string Identity { get; set; } = string.Empty;
+        public string Source { get; set; } = string.Empty;
+        public bool IsMuted { get; set; }
+        public bool IsLocal { get; set; }
     }
 
     public async ValueTask DisposeAsync()
