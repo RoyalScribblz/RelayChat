@@ -66,7 +66,6 @@ const screenShareCaptureOptions = {
     audio: true,
     contentHint: "detail",
     preferCurrentTab: true,
-    selfBrowserSurface: "exclude",
     surfaceSwitching: "include",
     systemAudio: "include",
     video: {
